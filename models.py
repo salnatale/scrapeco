@@ -207,3 +207,6 @@ class LinkedInProfile(BaseModel):
             # Process other sections accordingly
             urn_id=raw_data["urn_id"]
         )
+class APIStatus(BaseModel):
+    pass
+    # build out APIStatus module
