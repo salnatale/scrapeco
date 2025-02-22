@@ -68,7 +68,7 @@ class LinkedInAPI:
         self.status.account_statuses = {id: AccountStatus(rate_limit=1000, remaining_calls=1000, reset_time=datetime.now()  
 ) for id in linkedin_logins}
         
-        self.active_account = LINKEDIN_USER
+        self.active_account = "LINKEDIN_USER_1"
     def ensure_curr_safety(self) -> bool:
         """
         Check if, by determined metrics, a call is safe to make with current environment.
@@ -77,12 +77,21 @@ class LinkedInAPI:
             True if account is switched
             False otherwise
         """
+        print("entering safety check")
+
         if self.count_usable() == 0: 
             print("no active account ready for querying")
             return False
-        
+        print("checking account safety")
+        print("self.active_account",self.active_account)
+        print("self.status",self.status)
+        print("self.status.account_statuses",self.status.account_statuses)
+        print("active account in statuses",self.active_account in self.status.account_statuses)
         curr_status = self.status.account_statuses[self.active_account]
+        print("checked account safety")
+
         if curr_status.usable == True:
+            print("Account is usable")
             if curr_status.remaining_calls <= 0:
                 print("Warning: Account has run out of calls.")
 
@@ -98,6 +107,7 @@ class LinkedInAPI:
                 # check if account is safe to use
                 return self.ensure_curr_safety()
             else:
+                print("returning true")
                 return True
         else: 
             print("Warning: Account is not usable.")
@@ -145,16 +155,20 @@ class LinkedInAPI:
             curr_status.remaining_calls = curr_status.rate_limit
             print(f"Account {account_id} has been immediately reset and is now usable")
 
-    def attempt_safe_call(self, func,err_msg = None,bad_return = None, *args, **kwargs, ):
+    def attempt_safe_call(self, func,*args,err_msg = None,bad_return = None, **kwargs):
+    # Method implementation
+
         # attempt safe call to linkedin api
         #default msg
+        print("entering safe call")
         if not err_msg:
             err_msg = "Error calling linkedInAPI method:"
 
         # last call, use log normal frequency for time between calls
         # last call, use log normal frequency for time between calls
-        delay = lognorm.rvs(2, loc=1.2)
+        delay = lognorm.rvs(1, loc=1.2)
         time_since_last_call = datetime.now() - self.status.last_call
+        
         if time_since_last_call < timedelta(seconds=delay):
             to_wait = (delay - time_since_last_call.total_seconds())
             print(f"Waiting {to_wait:.2f} seconds before next call")
@@ -168,11 +182,12 @@ class LinkedInAPI:
                 return bad_return
             
             #update api status
+            print("updating statuses")
             self.status.last_call = datetime.now()
             self.status.total_calls += 1
             self.status.account_statuses[self.active_account].remaining_calls -= 1
-            self.status.account_statuses[self.active_account].last_call = datetime.now()
 
+            print(f"Calling {func.__name__} with args={args} kwargs={kwargs}")
             return func(*args, **kwargs)
         except Exception as call_err:
             print(err_msg, call_err)
@@ -189,11 +204,12 @@ class LinkedInAPI:
             return
     # function to grab the profile of a user
     def get_profile_from_public_ID(self, public_uid):
+        print("Getting profile for", public_uid)
         if not self.api:
             print("LinkedIn API client is not initialized.")
             return None
-        # return self.attempt_safe_call(self.api.get_profile, public_uid)
-        return self.api.get_profile(public_uid)
+        return self.attempt_safe_call(self.api.get_profile, public_uid)
+        # return self.api.get_profile(public_uid)
         
 
     # function to grab the connections of a user
@@ -202,7 +218,7 @@ class LinkedInAPI:
             print("LinkedIn API client is not initialized.")
             return None
         # attempt to get connections
-        self.attempt_safe_call(self.api.get_profile_connections,err_msg="Error fetching connections",bad_return = [], urn_id = uid)
+        return self.attempt_safe_call(self.api.get_profile_connections,err_msg="Error fetching connections",bad_return = [], urn_id = uid)
 
 
     # function to grab the companies a user is following
@@ -211,17 +227,18 @@ class LinkedInAPI:
             print("LinkedIn API client is not initialized.")
             return None
         return self.attempt_safe_call(self.api.get_profile_experiences,username, err_msg= f"Error fetching experiences for username '{username}':",)
-    
+        self.api.sear
     def test_all(self):
         # Test the complete flow with careful error handling
         try:
             profile = self.get_profile_from_public_ID("alexandra-gier")
+            print("Profile:", profile)
             if not profile:
                 print("No profile returned.")
                 return
             try:
                 # Parse the raw profile using your model parser
-                linkedin_profile = LinkedInProfile.parse_raw_profile(profile)
+                linkedin_profile = LinkedInProfile.parse_raw_profile(LinkedInProfile,profile)
                 print("Parsed profile:", linkedin_profile)
             except Exception as parse_err:
                 print("Error parsing profile data:", parse_err)

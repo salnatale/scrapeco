@@ -145,7 +145,8 @@ class LinkedInProfile(BaseModel):
 
     class Config:
         populate_by_name = True
-        
+    
+    @classmethod
     def parse_raw_profile(cls, raw_data: Dict[str, Any]) -> "LinkedInProfile":
         """
         Factory method to parse a raw LinkedIn profile JSON into a structured model
@@ -310,7 +311,7 @@ class LinkedInCompany(BaseModel):
     
     class Config:
         populate_by_name = True
-        
+
     @classmethod
     def parse_raw_model(cls, raw_data: Dict[str, Any]) -> "LinkedInCompany":
         """
