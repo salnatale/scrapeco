@@ -67,12 +67,18 @@ class LinkedInAPI:
 ) for id in linkedin_logins}
         
         self.active_account = LINKEDIN_USER
-    def check_curr_safety(self):
+    def ensure_curr_safety(self) -> bool:
         """
-        Check if, by determined metrics, a call is safe to make with current environment
+        Check if, by determined metrics, a call is safe to make with current environment.
+        If it is not, switch accounts to a valid one, else return false. 
+        Returns: 
+            True if account is switched
+            False otherwise
         """
-        # check if current account is safe to use
-        # TODO: set unusable account limit, to cut out. 
+        if self.count_usable() == 0: 
+            print("no active account ready for querying")
+            return False
+        
         curr_status = self.status.account_statuses[self.active_account]
         if curr_status.usable == True:
             if curr_status.remaining_calls <= 0:
@@ -88,7 +94,7 @@ class LinkedInAPI:
                 self.switch_active_account(linkedin_logins[next_account]["username"], linkedin_logins[next_account]["password"])
                 self.active_account = next_account
                 # check if account is safe to use
-                return self.check_curr_safety()
+                return self.ensure_curr_safety()
             else:
                 return True
         else: 
@@ -100,8 +106,15 @@ class LinkedInAPI:
             self.switch_active_account(linkedin_logins[next_account]["username"], linkedin_logins[next_account]["password"])
             self.active_account = next_account
             # check if account is safe to use
-            return self.check_curr_safety()
+            return self.ensure_curr_safety()
         
+    def count_usable(self): 
+        """
+        count the number of usable accounts reamaining from the account statuses usable field
+        """
+        # check the usable field for all entries within the account statuses dictionary
+        return sum([entry.usable for entry in self.status.account_statuses.values()])
+
     async def reset_account_usability(self, account_id):
         """
         Asynchronously wait until the reset time for an account, then mark it as usable again.
@@ -137,11 +150,12 @@ class LinkedInAPI:
             err_msg = "Error calling linkedInAPI method:"
     
         try:
-            self.check_curr_safety()
+            self.ensure_curr_safety()
             return func(*args, **kwargs)
         except Exception as call_err:
             print(err_msg, call_err)
             return bad_return
+        
             
     def switch_active_account(self, username, password):
         # switch active account
