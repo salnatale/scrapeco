@@ -1,8 +1,11 @@
 from linkedin_api import *
-from models import LinkedInProfile
-from models import APIStatus
-
+from models import LinkedInProfile, LinkedInCompany
+from models import APIStatus, AccountStatus
+from datetime import datetime, timedelta
 import requests
+import time
+import itertools
+import asyncio
 # create local handler for linkedin api
 # define username ID class based off string
 
@@ -58,13 +61,74 @@ class LinkedInAPI:
         except Exception as init_err:
             print("Failed to initialize LinkedIn client:", init_err)
             self.api = None
-        self.curr_info = APIStatus()
+        self.status = APIStatus(last_call =datetime.now(),total_calls=0, account_statuses = {})
+        self.account_cycle = itertools.cycle(linkedin_logins)
+        self.status.account_statuses = {id: AccountStatus(rate_limit=1000, remaining_calls=1000, reset_time=datetime.now()  
+) for id in linkedin_logins}
+        
+        self.active_account = LINKEDIN_USER
     def check_curr_safety(self):
         """
         Check if, by determined metrics, a call is safe to make with current environment
         """
         # check if current account is safe to use
-        #rate limit ds  = {"x-ratelimit-limit": "1000", "x-ratelimit-remaining": "999", "x-ratelimit-reset": "1633660800"}
+        # TODO: set unusable account limit, to cut out. 
+        curr_status = self.status.account_statuses[self.active_account]
+        if curr_status.usable == True:
+            if curr_status.remaining_calls <= 0:
+                print("Warning: Account has run out of calls.")
+
+                curr_status.usable = False
+                self.reset_account_usability(self.active_account)
+
+                # switch account
+                # get next account
+                next_account = next(self.account_cycle)
+                # switch active account
+                self.switch_active_account(linkedin_logins[next_account]["username"], linkedin_logins[next_account]["password"])
+                self.active_account = next_account
+                # check if account is safe to use
+                return self.check_curr_safety()
+            else:
+                return True
+        else: 
+            print("Warning: Account is not usable.")
+            # switch account
+            # get next account
+            next_account = next(self.account_cycle)
+            # switch active account
+            self.switch_active_account(linkedin_logins[next_account]["username"], linkedin_logins[next_account]["password"])
+            self.active_account = next_account
+            # check if account is safe to use
+            return self.check_curr_safety()
+        
+    async def reset_account_usability(self, account_id):
+        """
+        Asynchronously wait until the reset time for an account, then mark it as usable again.
+        
+        Args:
+            account_id: The ID of the account to reset
+        """
+        curr_status = self.status.account_statuses[account_id]
+        
+        # Calculate how long to wait until reset time
+        now = datetime.now()
+        if curr_status.reset_time > now:
+            wait_seconds = (curr_status.reset_time - now).total_seconds()
+            print(f"Account {account_id} will be reset after {wait_seconds:.2f} seconds")
+            
+            # Wait until the reset time
+            await asyncio.sleep(wait_seconds)
+            
+            # Reset the account status
+            curr_status.usable = True
+            curr_status.remaining_calls = curr_status.rate_limit
+            print(f"Account {account_id} has been reset and is now usable")
+        else:
+            # If reset time has already passed, immediately reset
+            curr_status.usable = True
+            curr_status.remaining_calls = curr_status.rate_limit
+            print(f"Account {account_id} has been immediately reset and is now usable")
 
     def attempt_safe_call(self, func,err_msg = None,bad_return = None, *args, **kwargs, ):
         # attempt safe call to linkedin api
@@ -92,7 +156,8 @@ class LinkedInAPI:
         if not self.api:
             print("LinkedIn API client is not initialized.")
             return None
-        return self.attempt_safe_call(self.api.get_profile, public_uid)
+        # return self.attempt_safe_call(self.api.get_profile, public_uid)
+        return self.api.get_profile(public_uid)
         
 
     # function to grab the connections of a user
@@ -114,16 +179,20 @@ class LinkedInAPI:
     def test_all(self):
         # Test the complete flow with careful error handling
         try:
-            profile = self.get_profile_from_public_ID("salnatale")
+            profile = self.get_profile_from_public_ID("alexandra-gier")
             if not profile:
                 print("No profile returned.")
                 return
             try:
                 # Parse the raw profile using your model parser
-                linkedin_profile = LinkedInProfile.parse_raw_profile(LinkedInProfile, profile)
+                linkedin_profile = LinkedInProfile.parse_raw_profile(profile)
                 print("Parsed profile:", linkedin_profile)
             except Exception as parse_err:
                 print("Error parsing profile data:", parse_err)
         except Exception as test_err:
             print("Error in test_all method:", test_err)
-
+    def find_company(self,profile_id):
+        # find a profile by id
+        print(self.api.get_company(public_id=profile_id))
+        return LinkedInCompany.parse_raw_model(self.api.get_company(public_id=profile_id))
+    
