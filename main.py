@@ -6,6 +6,8 @@ import requests
 import time
 import itertools
 import asyncio
+from scipy.stats import lognorm
+
 # create local handler for linkedin api
 # define username ID class based off string
 
@@ -148,9 +150,29 @@ class LinkedInAPI:
         #default msg
         if not err_msg:
             err_msg = "Error calling linkedInAPI method:"
-    
+
+        # last call, use log normal frequency for time between calls
+        # last call, use log normal frequency for time between calls
+        delay = lognorm.rvs(2, loc=1.2)
+        time_since_last_call = datetime.now() - self.status.last_call
+        if time_since_last_call < timedelta(seconds=delay):
+            to_wait = (delay - time_since_last_call.total_seconds())
+            print(f"Waiting {to_wait:.2f} seconds before next call")
+            time.sleep(to_wait)
+
+        
         try:
-            self.ensure_curr_safety()
+            if not self.ensure_curr_safety():
+                print("No safe accounts available.")
+                print(err_msg, call_err)
+                return bad_return
+            
+            #update api status
+            self.status.last_call = datetime.now()
+            self.status.total_calls += 1
+            self.status.account_statuses[self.active_account].remaining_calls -= 1
+            self.status.account_statuses[self.active_account].last_call = datetime.now()
+
             return func(*args, **kwargs)
         except Exception as call_err:
             print(err_msg, call_err)
