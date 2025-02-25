@@ -7,6 +7,9 @@ import time
 import itertools
 import asyncio
 from scipy.stats import lognorm
+from database import send_to_druid
+from mock import *
+import random
 
 # create local handler for linkedin api
 # define username ID class based off string
@@ -227,7 +230,7 @@ class LinkedInAPI:
             print("LinkedIn API client is not initialized.")
             return None
         return self.attempt_safe_call(self.api.get_profile_experiences,username, err_msg= f"Error fetching experiences for username '{username}':",)
-        self.api.sear
+    
     def test_all(self):
         # Test the complete flow with careful error handling
         try:
@@ -249,3 +252,124 @@ class LinkedInAPI:
         print(self.api.get_company(public_id=profile_id))
         return LinkedInCompany.parse_raw_model(self.api.get_company(public_id=profile_id))
     
+    # perform a api linkedin search with a set of kwargs, return the list of profiles
+    def search_profiles(self, **kwargs):
+        """
+        Perform a search of LinkedIn profiles based on the provided criteria.
+        Args:
+            keywords: str | None = None,
+            connection_of: str | None = None,
+            network_depths: List[Literal['F', 'S', 'O']] | None = None,
+            current_company: List[str] | None = None,
+            past_companies: List[str] | None = None,
+            nonprofit_interests: List[str] | None = None,
+            profile_languages: List[str] | None = None,
+            regions: List[str] | None = None,
+            industries: List[str] | None = None,
+            schools: List[str] | None = None,
+            contact_interests: List[str] | None = None,
+            service_categories: List[str] | None = None,
+            include_private_profiles: bool = False,
+            keyword_first_name: str | None = None,
+            keyword_last_name: str | None = None,
+            keyword_title: str | None = None,
+            keyword_company: str | None = None,
+            keyword_school: str | None = None,
+            network_depth: Literal['F', 'S', 'O'] | None = None,
+            title: str | None = None,
+        Returns:
+            List[dict] - A list of LinkedIn profiles
+        """
+        if not self.api:
+            print("LinkedIn API client is not initialized.")
+            return None
+        return self.attempt_safe_call(self.api.search_people, err_msg="Error searching profiles",bad_return = [], **kwargs)
+    
+
+
+
+    
+
+    def find(self,kwargs,description) -> List[LinkedInProfile]:
+        """
+        Find LinkedIn profiles based on the provided criteria and description.
+        Args:
+            kwargs: dict - A dictionary of search criteria (see search_profiles)
+            description: str - A description of the desired profile(s)
+        Returns:
+            List[LinkedInProfile] - The LinkedIn profiles that match the description
+        """
+
+        # find a profile or set of profiles by description
+        # perform a search of linkedin profiles based on criterion found via description
+        # (optional) create linkedin profile search via description 
+        # ->    return a list of profiles
+        # determine (LLM) which (if any) of the returned profiles are the desired profile from the query
+        # ->    return the desired profile(s)
+        # parse the raw profile(s) into the LinkedInProfile model
+        # load the profile(s) (correct model) into the database
+        # ->    return the loaded profile(s) models
+        profiles = self.search_profiles(**kwargs)
+        print("Profiles:", profiles)
+        if not profiles:
+            print("No profiles found.")
+            return []
+        # Filter the profiles using the LLM filter
+        filtered_profiles = llm_filter_profile_list(profiles, description)
+        
+        print("Filtered profiles:", filtered_profiles)
+        if not filtered_profiles:
+            print("No profiles matched the description.")
+            return []
+        
+        return filtered_profiles
+
+
+# create and upload 1000 intelligently created mock profiles with unique ids
+def create_and_upload_mock_profiles(num):
+    # iterate through unique id's
+    profiles = []
+    for i in range(num):
+        # create unique mock urn_id using i
+        urn_id = f"urn:li:mock_profile:{i}"
+        # create a bank of companies to assign to profiles, along with their mock urn_id's. Model on real companies
+        companies = [
+            {"name": "Google", "urn_id": "urn:li:Google:1"},
+            {"name": "Facebook", "urn_id": "urn:li:Facebook:2"},
+            {"name": "Microsoft", "urn_id": "urn:li:Microsoft:3"},
+            {"name": "Apple", "urn_id": "urn:li:Apple:4"},
+            {"name": "Amazon", "urn_id": "urn:li:Amazon:5"},
+            {"name": "Netflix", "urn_id": "urn:li:Netflix:6"},
+            {"name": "Tesla", "urn_id": "urn:li:Tesla:7"},
+            {"name": "SpaceX", "urn_id": "urn:li:SpaceX:8"},
+            {"name": "Twitter", "urn_id": "urn:li:Twitter:9"},
+            {"name": "LinkedIn", "urn_id": "urn:li:LinkedIn:10"}
+        ]
+        first_names = ["Archie", "Betty", "Charlie", "Daisy", "Ella", "Finn", "Grace", "Henry", "Ivy", "Jack", "Katie", "Liam", "Mia", "Noah", "Olivia", "Parker", "Quinn", "Riley", "Sophia", "Theo", "Uma", "Violet", "Wyatt", "Xander", "Yara", "Zara"]
+        last_names = ["Adams", "Baker", "Chen", "Diaz", "Evans", "Fisher", "Garcia", "Hernandez", "Ito", "Jones", "Kim", "Lee", "Martinez", "Nguyen", "O'Connor", "Patel", "Quinn", "Rodriguez", "Smith", "Taylor", "Ueda", "Vasquez", "Wang", "Xu", "Yang", "Zhang"]
+        university = ["Harvard University", "Stanford University", "Massachusetts Institute of Technology", "Cornell University","California Institute of Technology", "University of California, Berkeley", "University of California, Los Angeles", "University of Michigan", "University of Texas at Austin", "University of Washington", "University of Wisconsin-Madison"]
+        # generate random urn_id
+        id = random.randint(1000000000, 9999999999)
+        # create mock profile, using intelligent mock profile creation, unique urn_id and randomly chosen company
+        while True:
+            try: 
+                mock_profile = LinkedInProfile(**create_intelligent_mock_profile(first_name = random.choice(first_names),last_name = random.choice(last_names), school = random.choice(university), company = random.choice(companies),urn_id = random.randint(1000000000, 9999999999)))
+                break
+            except Exception as mock_err:
+                print("Error creating mock profile:", mock_err)
+            # retry
+            continue
+        # progress updates
+        if i % 5 == 1:
+            print(f"Created {i} mock profiles / 100")
+            most_recent :LinkedInProfile = profiles[-1] 
+            print("Most Recent:",most_recent.first_name,most_recent.last_name,most_recent.experience[0].company.name)
+
+        profiles.append(mock_profile)
+    
+    # upload mock necessary data to druid db
+    # send_to_druid(profiles = profiles, companies = [])
+    # upload mock necessary data to neo4j db
+
+    # 
+    return profiles

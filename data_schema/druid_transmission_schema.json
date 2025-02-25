@@ -1,0 +1,47 @@
+{
+  "type": "index_parallel",
+  "spec": {
+    "dataSchema": {
+      "dataSource": "employee_transitions",
+      "timestampSpec": {"column": "transition_date", "format": "iso"},
+      "dimensionsSpec": {
+        "dimensions": [
+          {"name": "profile_urn", "type": "string"},
+          {"name": "from_company_urn", "type": "string"},
+          {"name": "to_company_urn", "type": "string"},
+          {"name": "transition_type", "type": "string"},
+          {"name": "old_title", "type": "string"},
+          {"name": "new_title", "type": "string"},
+          {"name": "location_change", "type": "string"}
+        ]
+      },
+      "metricsSpec": [
+        {
+          "name": "tenure_days", 
+          "type": "longSum",
+          "fieldName": "tenure_days"
+        }
+      ],
+      "granularitySpec": {
+        "type": "uniform",
+        "segmentGranularity": "DAY",
+        "queryGranularity": "NONE",
+        "rollup": false
+      }
+    },
+    "ioConfig": {
+      "type": "index_parallel",
+      "inputSource": {"type": "inline", "data": ""},
+      "inputFormat": {"type": "json"}
+    },
+    "tuningConfig": {
+      "type": "index_parallel",
+      "partitionsSpec": {
+        "type": "dynamic",
+        "maxRowsPerSegment": 5000000,
+        "maxTotalRows": 20000000
+      },
+      "forceGuaranteedRollup": false
+    }
+  }
+}

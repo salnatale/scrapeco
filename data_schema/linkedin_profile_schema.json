@@ -1,0 +1,167 @@
+{
+    "type": "json_schema",
+    "json_schema": {
+        "name": "linkedin_profile_schema",
+        "schema": {
+            "type": "object",
+            "title": "LinkedInProfile",
+            "additionalProperties": false,
+            "properties": {
+                "profile_id": {"type": "string"},
+                "profile_urn": {"type": "string"},
+                "member_urn": {"type": ["string", "null"]},
+                "public_id": {"type": ["string", "null"]},
+                "firstName": {"type": "string"},
+                "lastName": {"type": "string"},
+                "headline": {"type": ["string", "null"]},
+                "summary": {"type": ["string", "null"]},
+                "industryName": {"type": ["string", "null"]},
+                "industryUrn": {"type": ["string", "null"]},
+                "locationName": {"type": ["string", "null"]},
+                "geoCountryName": {"type": ["string", "null"]},
+                "geoCountryUrn": {"type": ["string", "null"]},
+                "student": {"type": ["boolean", "null"]},
+                "experience": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "title": "Experience",
+                        "additionalProperties": false,
+                        "properties": {
+                            "title": {"type": "string"},
+                            "company": {
+                                "type": "object",
+                                "title": "Company",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "companyName": {"type": "string"},
+                                    "companyUrn": {"type": ["string", "null"]},
+                                    "companyLogoUrl": {"type": ["string", "null"]},
+                                    "employeeCountRange": {
+                                        "type": ["object", "null"],
+                                        "additionalProperties": {
+                                            "type": "number"
+                                        }
+                                    },
+                                    "industries": {
+                                        "type": ["array", "null"],
+                                        "items": {"type": "string"}
+                                    }
+                                },
+                                "required": ["companyName"]
+                            },
+                            "description": {"type": ["string", "null"]},
+                            "location": {
+                                "type": ["object", "null"],
+                                "title": "Location",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "locationName": {"type": ["string", "null"]},
+                                    "geoLocationName": {"type": ["string", "null"]},
+                                    "geoUrn": {"type": ["string", "null"]},
+                                    "region": {"type": ["string", "null"]}
+                                }
+                            },
+                            "timePeriod": {
+                                "type": "object",
+                                "title": "TimePeriod",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "startDate": {
+                                        "type": ["object", "null"],
+                                        "properties": {
+                                            "year": {"type": "number"},
+                                            "month": {"type": "number"}
+                                        },
+                                        "additionalProperties": false
+                                    },
+                                    "endDate": {
+                                        "type": ["object", "null"],
+                                        "properties": {
+                                            "year": {"type": "number"},
+                                            "month": {"type": "number"}
+                                        },
+                                        "additionalProperties": false
+                                    }
+                                }
+                            },
+                            "entityUrn": {"type": ["string", "null"]}
+                        },
+                        "required": ["title", "company", "timePeriod"]
+                    }
+                },
+                "education": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "title": "Education",
+                        "additionalProperties": false,
+                        "properties": {
+                            "school": {
+                                "type": "object",
+                                "title": "School",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "schoolName": {"type": "string"},
+                                    "schoolUrn": {"type": ["string", "null"]},
+                                    "logo_url": {"type": ["string", "null"]},
+                                    "active": {"type": ["boolean", "null"]}
+                                },
+                                "required": ["schoolName"]
+                            },
+                            "degreeName": {"type": ["string", "null"]},
+                            "fieldOfStudy": {"type": ["string", "null"]},
+                            "timePeriod": {
+                                "type": "object",
+                                "properties": {
+                                    "startDate": {
+                                        "type": ["object", "null"],
+                                        "properties": {
+                                            "year": {"type": "number"},
+                                            "month": {"type": "number"}
+                                        },
+                                        "additionalProperties": false
+                                    },
+                                    "endDate": {
+                                        "type": ["object", "null"],
+                                        "properties": {
+                                            "year": {"type": "number"},
+                                            "month": {"type": "number"}
+                                        },
+                                        "additionalProperties": false
+                                    }
+                                },
+                                "required": ["startDate", "endDate"]
+                            },
+                            "entityUrn": {"type": ["string", "null"]}
+                        },
+                        "required": ["school", "timePeriod"]
+                    }
+                },
+                "projects": {
+                    "type": "array",
+                    "items": {"type": "object"}
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "name": {"type": "string"}
+                        },
+                        "required": ["name"]
+                    }
+                },
+                "urn_id": {"type": "string"}
+            },
+            "required": [
+                "profile_id",
+                "profile_urn",
+                "firstName",
+                "lastName",
+                "urn_id"
+            ]
+        }
+    }
+}
