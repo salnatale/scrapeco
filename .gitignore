@@ -1,3 +1,6 @@
 venv_lnkdn
 .env
 BrightData SSL certificate (port 33335).crt
+
+mock_data/
+__pycache__/
