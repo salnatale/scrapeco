@@ -1,6 +1,9 @@
-venv_lnkdn
+venv_lndkn
 .env
 BrightData SSL certificate (port 33335).crt
 
 mock_data/
 __pycache__/
+
+neo4j_homedir
+.vscode
