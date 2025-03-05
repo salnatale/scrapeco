@@ -7,7 +7,7 @@ import time
 import itertools
 import asyncio
 from scipy.stats import lognorm
-from database import send_to_druid
+from druid_database import send_to_druid
 from mock import *
 import random
 

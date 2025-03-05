@@ -763,11 +763,12 @@ class LinkedInDataGenerator:
             new_company = self.generate_company()
             while new_company["companyName"] == old_experience["company"]["companyName"]:
                 new_company = self.generate_company()
+            new_title = random.choice(ALLOWED_TRANSITIONS[old_experience["title"]])
                 
             new_experience = {
-                "title": old_experience["title"],  # Same title, new company
+                "title": new_title,  # Same title, new company
                 "company": new_company,
-                "description": f"Joined {new_company['companyName']} as a {old_experience['title']}.",
+                "description": f"Joined {new_company['companyName']} as a {new_title}.",
                 "location": self.generate_location(),
                 "timePeriod": {
                     "startDate": {
@@ -781,21 +782,7 @@ class LinkedInDataGenerator:
         elif transition_type == "promotion":
             # Promotion at the same company
             current_title = old_experience["title"]
-            new_title = current_title
-            
-            # Try to create a realistic promotion
-            if "senior" not in current_title.lower() and "lead" not in current_title.lower():
-                new_title = "Senior " + current_title
-            elif "manager" not in current_title.lower() and "director" not in current_title.lower():
-                new_title = "Manager" if "manager" not in current_title.lower() else "Director"
-                if "engineering" in current_title.lower() or "software" in current_title.lower():
-                    new_title += " of Engineering"
-                elif "product" in current_title.lower():
-                    new_title += " of Product"
-                elif "data" in current_title.lower():
-                    new_title += " of Data Science"
-                else:
-                    new_title += " of " + current_title.split()[-1]
+            new_title = random.choice(ALLOWED_TRANSITIONS[current_title])
             
             new_experience = {
                 "title": new_title,
@@ -961,7 +948,8 @@ class LinkedInDataGenerator:
                                  transition_rate: float = 0.3,
                                  transition_distribution: Optional[Dict[str, float]] = None) -> List[Dict[str, Any]]:
         """
-        Generate job transitions for a set of profiles.
+        Generate job transitions for a set of profiles,
+        and set the DataGenerator's profiles field to the new profiles w/ updates
         
         Args:
             profiles: List of profiles to generate transitions for
