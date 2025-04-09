@@ -22,6 +22,7 @@ NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4j")
 
+# TODO: GO through and test the Neo4jDatabase and Neo4jProfileAnalyzer queries on
 class Neo4jDatabase:
     """
     Handles interactions with Neo4j graph database for LinkedIn profile data.
@@ -678,43 +679,43 @@ class Neo4jDatabase:
         results = self._run_query(query, {"companyUrn": company_urn})
         return results[0]["stats"] if results else {}
     
-    def get_skill_trends(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get trending skills based on recent transitions.
+    # def get_skill_trends(self, limit: int = 10) -> List[Dict[str, Any]]:
+    #     """
+    #     Get trending skills based on recent transitions.
         
-        Args:
-            limit: Maximum number of trending skills to return
+    #     Args:
+    #         limit: Maximum number of trending skills to return
             
-        Returns:
-            List of trending skills with counts
-        """
-        query = """
-        MATCH (p:Profile)-[:HAS_SKILL]->(s:Skill)
-        WITH s, count(p) as profileCount
+    #     Returns:
+    #         List of trending skills with counts
+    #     """
+    #     query = """
+    #     MATCH (p:Profile)-[:HAS_SKILL]->(s:Skill)
+    #     WITH s, count(p) as profileCount
         
-        // Find transitions from profiles with this skill in the last year
-        OPTIONAL MATCH (p2:Profile)-[:HAS_SKILL]->(s)
-                      -[:HAS_TRANSITION]->(t:Transition)
-        WHERE datetime(t.date) >= datetime.truncate('year', datetime()) - duration('P1Y')
+    #     // Find transitions from profiles with this skill in the last year
+    #     OPTIONAL MATCH (p2:Profile)-[:HAS_SKILL]->(s)
+    #                   -[:HAS_TRANSITION]->(t:Transition)
+    #     WHERE datetime(t.date) >= datetime.truncate('year', datetime()) - duration('P1Y')
         
-        WITH s, profileCount, count(t) as transitionCount
+    #     WITH s, profileCount, count(t) as transitionCount
         
-        // Calculate a trend score (higher is more trending)
-        WITH s, profileCount, transitionCount,
-             toFloat(transitionCount) / toFloat(profileCount + 1) as trendScore
+    #     // Calculate a trend score (higher is more trending)
+    #     WITH s, profileCount, transitionCount,
+    #          toFloat(transitionCount) / toFloat(profileCount + 1) as trendScore
         
-        RETURN {
-            skillName: s.name,
-            profileCount: profileCount,
-            recentTransitions: transitionCount,
-            trendScore: trendScore
-        } as skill
-        ORDER BY skill.trendScore DESC, skill.profileCount DESC
-        LIMIT $limit
-        """
+    #     RETURN {
+    #         skillName: s.name,
+    #         profileCount: profileCount,
+    #         recentTransitions: transitionCount,
+    #         trendScore: trendScore
+    #     } as skill
+    #     ORDER BY skill.trendScore DESC, skill.profileCount DESC
+    #     LIMIT $limit
+    #     """
         
-        results = self._run_query(query, {"limit": limit})
-        return [r["skill"] for r in results]
+    #     results = self._run_query(query, {"limit": limit})
+    #     return [r["skill"] for r in results]
     
     # def recommend_connections(self, profile_urn: str, limit: int = 10) -> List[Dict[str, Any]]:
         """

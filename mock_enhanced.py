@@ -535,7 +535,8 @@ class LinkedInDataGenerator:
                        career_length : str = "mid",  # "early", "mid", "senior", "executive" 
                        education_level: str = "bachelors",  # "bachelors", "masters", "phd"
                        tier: Optional[str] = None, # "mid", "high", "top"
-                       num_skills: int = 8) -> Dict[str, Any]:
+                       num_skills: int = 8,
+                       force:bool = False) -> Dict[str, Any]:
         """
         Generate a complete profile with realistic data based on specified parameters.
         
@@ -543,6 +544,7 @@ class LinkedInDataGenerator:
             career_length: Length/seniority of career to generate
             education_level: Level of education to generate
             num_skills: Number of skills to generate
+            force: If True, generate a profile that ignores probabilities and generates a profile with specified career length
             
         Returns:
             Complete LinkedIn profile data
@@ -627,21 +629,28 @@ class LinkedInDataGenerator:
         total_score = 0
         for edu in education:
             score = 0
-            if edu["degreeName"] == "Bachelor of Science":
+            print("degree", edu["degreeName"])
+            if "Bachelor" in edu["degreeName"]:
                 score += 1
-            elif edu["degreeName"] == "Master of Science":
+            elif "Master" in edu["degreeName"]:
                 score += 2
-            elif edu["degreeName"] == "PhD":
+            elif "PhD" in edu["degreeName"]:
                 score += 3
-            if edu["school"] in UNIVERSITIES:
-                tier = UNIVERSITIES[edu["school"]]["tier"]
+            print("score p1", score)
+            print("school",edu["school"])
+            if edu["school"]["schoolName"] in {university["name"] for university in UNIVERSITIES}:
+                tier = {university["name"]:university["tier"] for university in UNIVERSITIES}[edu["school"]["schoolName"]]
+                print("tier", tier)
                 if tier == "mid":
                     score *= 1
                 elif tier == "high":
                     score *= 2
                 elif tier == "top":
                     score *= 3
+            print("score p2", score)
             total_score += score
+
+        print("total score",total_score)
 
         # sub function to get career config based on career length
         def get_stochastic_career_config(career_length):
@@ -686,18 +695,20 @@ class LinkedInDataGenerator:
             education_based_length = random.choices(["senior", "executive"], weights=[0.8, 0.2])[0]
         
         # Randomly choose between career length and education based length
-        career_length = career_length if random.random() < 0.5 else education_based_length
+        career_length = career_length or education_based_length
 
-        
+        print(career_length)
         # Map career length to number of positions and progression
         config = get_stochastic_career_config(career_length)
         
+        print(config)
         # Generate career trajectory
         experiences = self.generate_career_trajectory(
             num_positions=config["positions"],
             career_progression=config["progression"], 
             education_field = education[0]["fieldOfStudy"] if education else None,
         )
+
         
         # Current position from most recent experience
         current_position = experiences[0]["title"] if experiences else "Professional"
