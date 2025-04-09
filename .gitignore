@@ -9,3 +9,5 @@ neo4j_homedir
 .vscode
 frontend/*/node_modules
 frontend/server/uploads
+dist/
+build/ 
