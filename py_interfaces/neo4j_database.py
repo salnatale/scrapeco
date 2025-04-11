@@ -295,7 +295,7 @@ class Neo4jDatabase:
             for industry in company_data["company_industries"]:
                 industry_query = """
                 MATCH (c:Company {urn: $companyUrn})
-                MERGE (i:Industry {name: $industryName})
+                MERGE (i:Industry {name: $industryName.localized_name})
                 MERGE (c)-[r:IN_INDUSTRY]->(i)
                 RETURN i
                 """
@@ -443,35 +443,392 @@ class Neo4jDatabase:
             "tenureDays": transition_event["tenure_days"]
         })
     # add batch methods for ease of use
+    # def batch_store_profiles(self, profiles: List[LinkedInProfile]):
+    #     """
+    #     Store multiple LinkedIn profiles in the Neo4j database.
+        
+    #     Args:
+    #         profiles: List of LinkedInProfile model instances
+    #     """
+    #     for profile in profiles:
+    #         self.store_profile(profile)
+    
     def batch_store_profiles(self, profiles: List[LinkedInProfile]):
         """
-        Store multiple LinkedIn profiles in the Neo4j database.
+        Complete batch processing solution for storing LinkedIn profiles in Neo4j.
         
         Args:
             profiles: List of LinkedInProfile model instances
         """
+        # Process profile nodes first
+        profile_dicts = []
         for profile in profiles:
-            self.store_profile(profile)
+            profile_data = profile.model_dump() if hasattr(profile, 'model_dump') else profile
+            profile_dicts.append({
+                "urn": profile_data["profile_urn"],
+                "profileId": profile_data["profile_id"],
+                "firstName": profile_data["first_name"],
+                "lastName": profile_data["last_name"],
+                "headline": profile_data.get("headline"),
+                "summary": profile_data.get("summary"),
+                "locationName": profile_data.get("location_name"),
+                "industryName": profile_data.get("industry_name"),
+                "publicId": profile_data.get("public_id")
+            })
+        
+        # Create all Profile nodes in a single batch operation
+        if profile_dicts:
+            create_profiles_query = """
+            UNWIND $profiles AS profile
+            MERGE (p:Profile {urn: profile.urn})
+            ON CREATE SET 
+                p.profileId = profile.profileId,
+                p.firstName = profile.firstName,
+                p.lastName = profile.lastName,
+                p.headline = profile.headline,
+                p.summary = profile.summary,
+                p.locationName = profile.locationName,
+                p.industryName = profile.industryName,
+                p.publicId = profile.publicId,
+                p.createdAt = datetime()
+            ON MATCH SET
+                p.firstName = profile.firstName,
+                p.lastName = profile.lastName,
+                p.headline = profile.headline,
+                p.summary = profile.summary,
+                p.locationName = profile.locationName,
+                p.industryName = profile.industryName,
+                p.updatedAt = datetime()
+            """
+            self._run_query(create_profiles_query, {"profiles": profile_dicts})
+        
+        # Process skills
+        all_skills = []
+        # Process education
+        all_education = []
+        # Process experience and companies
+        all_companies = []
+        all_experiences = []
+        
+        for profile in profiles:
+            profile_data = profile.model_dump() if hasattr(profile, 'model_dump') else profile
+            profile_urn = profile_data["profile_urn"]
+            
+            # Collect skills
+            if "skills" in profile_data and profile_data["skills"]:
+                for skill in profile_data["skills"]:
+                    all_skills.append({
+                        "profileUrn": profile_urn,
+                        "skillName": skill["name"]
+                    })
+            
+            # Collect education
+            if "education" in profile_data and profile_data["education"]:
+                for edu in profile_data["education"]:
+                    school = edu["school"]
+                    school_urn = school.get("urn") or f"urn:li:school:{school['name'].replace(' ', '').lower()}"
+                    
+                    time_period = edu["time_period"]
+                    start_date = time_period.get("start_date", {}) or {}
+                    end_date = time_period.get("end_date", {}) or {}
+                    
+                    all_education.append({
+                        "profileUrn": profile_urn,
+                        "schoolUrn": school_urn,
+                        "schoolName": school["name"],
+                        "active": school.get("active", True),
+                        "degreeName": edu.get("degree_name"),
+                        "fieldOfStudy": edu.get("field_of_study"),
+                        "startYear": start_date.get("year"),
+                        "startMonth": start_date.get("month"),
+                        "endYear": end_date.get("year"),
+                        "endMonth": end_date.get("month")
+                    })
+            
+            # Collect experience and companies
+            if "experience" in profile_data and profile_data["experience"]:
+                for exp in profile_data["experience"]:
+                    company_data = exp["company"]
+                    company_urn = company_data.get("urn") or company_data.get("companyUrn") or f"urn:li:company:{company_data['name'].replace(' ', '').lower()}"
+                    
+                    # Add company
+                    all_companies.append({
+                        "urn": company_urn,
+                        "name": company_data.get("name") or company_data.get("companyName")
+                    })
+                    
+                    # Add experience
+                    time_period = exp["time_period"]
+                    start_date = time_period.get("start_date", {}) or {}
+                    end_date = time_period.get("end_date", {}) or {}
+                    is_current = not end_date or not (end_date.get("year") and end_date.get("month"))
+                    
+                    location = exp.get("location", {}) or {}
+                    location_name = None
+                    if location:
+                        location_name = location.get("name") or location.get("locationName")
+                    
+                    exp_urn = exp.get("entity_urn") or exp.get("entityUrn") or f"exp-{profile_urn}-{company_urn}-{start_date.get('year')}-{start_date.get('month')}"
+                    
+                    all_experiences.append({
+                        "profileUrn": profile_urn,
+                        "companyUrn": company_urn,
+                        "expUrn": exp_urn,
+                        "title": exp["title"],
+                        "description": exp.get("description", ""),
+                        "startYear": start_date.get("year"),
+                        "startMonth": start_date.get("month"),
+                        "endYear": end_date.get("year"),
+                        "endMonth": end_date.get("month"),
+                        "isCurrent": is_current,
+                        "locationName": location_name
+                    })
+        
+        # Execute batch operations
+        
+        # 1. Skills
+        if all_skills:
+            skills_query = """
+            UNWIND $skills AS skill
+            MATCH (p:Profile {urn: skill.profileUrn})
+            MERGE (s:Skill {name: skill.skillName})
+            MERGE (p)-[r:HAS_SKILL]->(s)
+            """
+            self._run_query(skills_query, {"skills": all_skills})
+        
+        # 2. Schools and education
+        if all_education:
+            education_query = """
+            UNWIND $education AS edu
+            
+            MERGE (s:School {urn: edu.schoolUrn})
+            ON CREATE SET
+                s.name = edu.schoolName,
+                s.active = edu.active
+            
+            MATCH (p:Profile {urn: edu.profileUrn})
+            MERGE (p)-[r:ATTENDED]->(s)
+            ON CREATE SET
+                r.degreeName = edu.degreeName,
+                r.fieldOfStudy = edu.fieldOfStudy,
+                r.startYear = edu.startYear,
+                r.startMonth = edu.startMonth,
+                r.endYear = edu.endYear,
+                r.endMonth = edu.endMonth
+            """
+            self._run_query(education_query, {"education": all_education})
+        
+        # 3. Companies
+        if all_companies:
+            companies_query = """
+            UNWIND $companies AS company
+            MERGE (c:Company {urn: company.urn})
+            ON CREATE SET
+                c.name = company.name,
+                c.createdAt = datetime()
+            ON MATCH SET
+                c.name = company.name,
+                c.updatedAt = datetime()
+            """
+            self._run_query(companies_query, {"companies": all_companies})
+        
+        # 4. Experience
+        if all_experiences:
+            experience_query = """
+            UNWIND $experiences AS exp
+            
+            MATCH (p:Profile {urn: exp.profileUrn})
+            MATCH (c:Company {urn: exp.companyUrn})
+            
+            MERGE (e:Experience {urn: exp.expUrn})
+            ON CREATE SET
+                e.title = exp.title,
+                e.description = exp.description,
+                e.startYear = exp.startYear,
+                e.startMonth = exp.startMonth,
+                e.endYear = exp.endYear,
+                e.endMonth = exp.endMonth,
+                e.isCurrent = exp.isCurrent,
+                e.locationName = exp.locationName,
+                e.createdAt = datetime()
+            ON MATCH SET
+                e.title = exp.title,
+                e.description = exp.description,
+                e.startYear = exp.startYear,
+                e.startMonth = exp.startMonth,
+                e.endYear = exp.endYear,
+                e.endMonth = exp.endMonth,
+                e.isCurrent = exp.isCurrent,
+                e.locationName = exp.locationName,
+                e.updatedAt = datetime()
+            
+            MERGE (p)-[r1:HAS_EXPERIENCE]->(e)
+            MERGE (e)-[r2:AT_COMPANY]->(c)
+            """
+            self._run_query(experience_query, {"experiences": all_experiences})
+
+        print(f"Successfully batched {len(profiles)} profiles with their relationships")
     
     def batch_store_companies(self, companies: List[LinkedInCompany]):
         """
-        Store multiple companies in the Neo4j database.
+        Store multiple LinkedIn companies in Neo4j efficiently using batch operations.
         
         Args:
             companies: List of LinkedInCompany model instances
         """
+        # Convert all companies to dictionaries with normalized property names
+        company_dicts = []
+        industry_relationships = []
+        
         for company in companies:
-            self.store_company(company)
+            company_data = company.model_dump() if hasattr(company, 'model_dump') else company
+            
+            # Extract primary company data
+            company_urn = company_data.get("entity_urn") or company_data.get("entityUrn") or company_data.get("urn")
+            
+            # Skip if no valid URN
+            if not company_urn:
+                continue
+                
+            # Prepare company data
+            company_dict = {
+                "urn": company_urn,
+                "name": company_data.get("name"),
+                "description": company_data.get("description", ""),
+                "url": company_data.get("url", ""),
+                "staffCount": company_data.get("staff_count") or company_data.get("staffCount") or 0,
+                "staffCountRange": json.dumps(company_data.get("staff_count_range") or company_data.get("staffCountRange") or {}) if company_data.get("staff_count_range") or company_data.get("staffCountRange") else None
+            }
+            
+            company_dicts.append(company_dict)
+            
+            # Extract industry relationships
+            industries = []
+            if "company_industries" in company_data and company_data["company_industries"]:
+                for industry in company_data["company_industries"]:
+                    industry_name = None
+                    if isinstance(industry, dict) and "localized_name" in industry:
+                        industry_name = industry["localized_name"]
+                    elif isinstance(industry, str):
+                        industry_name = industry
+                    
+                    if industry_name:
+                        industry_relationships.append({
+                            "companyUrn": company_urn,
+                            "industryName": industry_name
+                        })
+        
+        # Execute batch operations
+        
+        # 1. Create all Company nodes
+        if company_dicts:
+            companies_query = """
+            UNWIND $companies AS company
+            MERGE (c:Company {urn: company.urn})
+            ON CREATE SET
+                c.name = company.name,
+                c.description = company.description,
+                c.url = company.url,
+                c.staffCount = company.staffCount,
+                c.staffCountRange = company.staffCountRange,
+                c.createdAt = datetime()
+            ON MATCH SET
+                c.name = company.name,
+                c.description = company.description,
+                c.url = company.url,
+                c.staffCount = company.staffCount,
+                c.staffCountRange = company.staffCountRange,
+                c.updatedAt = datetime()
+            """
+            self._run_query(companies_query, {"companies": company_dicts})
+            
+        # 2. Create Industry nodes and relationships
+        if industry_relationships:
+            industries_query = """
+            UNWIND $industries AS industry
+            MATCH (c:Company {urn: industry.companyUrn})
+            MERGE (i:Industry {name: industry.industryName})
+            MERGE (c)-[r:IN_INDUSTRY]->(i)
+            """
+            self._run_query(industries_query, {"industries": industry_relationships})
+            
+        print(f"Successfully stored {len(company_dicts)} companies with their industries")
     
     def batch_store_transitions(self, transitions: List[Dict[str, Any]]):
         """
-        Store multiple transition events in the Neo4j database.
+        Store multiple job transition events in Neo4j efficiently using batch operations.
         
         Args:
             transitions: List of transition event dictionaries
         """
+        # Normalize transition data
+        transition_dicts = []
+        
         for transition in transitions:
-            self.store_transition(transition)
+            # Format transition date if needed
+            transition_date = transition.get("transition_date")
+            if transition_date:
+                if isinstance(transition_date, str):
+                    # If it's already a string, ensure it's in ISO format
+                    if "T" not in transition_date:
+                        transition_date = f"{transition_date}T00:00:00"
+                else:
+                    # If it's a datetime object, convert to ISO format string
+                    transition_date = transition_date.isoformat()
+                    
+            transition_dict = {
+                "profileUrn": transition.get("profile_urn"),
+                "fromCompanyUrn": transition.get("from_company_urn"),
+                "toCompanyUrn": transition.get("to_company_urn"),
+                "transitionDate": transition_date,
+                "transitionType": transition.get("transition_type"),
+                "oldTitle": transition.get("old_title"),
+                "newTitle": transition.get("new_title"),
+                "locationChange": transition.get("location_change", False),
+                "tenureDays": transition.get("tenure_days", 0)
+            }
+            
+            # Only add if we have the minimum required data
+            if (transition_dict["profileUrn"] and 
+                transition_dict["fromCompanyUrn"] and 
+                transition_dict["toCompanyUrn"] and
+                transition_dict["transitionDate"]):
+                transition_dicts.append(transition_dict)
+        
+        # Execute batch operation for transitions
+        if transition_dicts:
+            transitions_query = """
+            UNWIND $transitions AS t
+            
+            MATCH (p:Profile {urn: t.profileUrn})
+            MATCH (oldCompany:Company {urn: t.fromCompanyUrn})
+            MATCH (newCompany:Company {urn: t.toCompanyUrn})
+            
+            CREATE (transition:Transition {
+                date: datetime(t.transitionDate),
+                type: t.transitionType,
+                oldTitle: t.oldTitle,
+                newTitle: t.newTitle,
+                locationChange: t.locationChange,
+                tenureDays: t.tenureDays
+            })
+            
+            CREATE (p)-[:HAS_TRANSITION]->(transition)
+            CREATE (transition)-[:FROM_COMPANY]->(oldCompany)
+            CREATE (transition)-[:TO_COMPANY]->(newCompany)
+            """
+            self._run_query(transitions_query, {"transitions": transition_dicts})
+            
+        print(f"Successfully stored {len(transition_dicts)} transition events")
+
+    def batch_store_chunked(self, func, data: List, batch_size=500):
+        """Store profiles,companies,or transitions in smaller batches for better performance"""
+        total = len(data)
+        for i in range(0, total, batch_size):
+            chunk = data[i:i+batch_size]
+            # Process this smaller chunk using your existing batch method
+            func(chunk)
+            print(f"Processed {float(min(i+batch_size, total))/float(total)}% of data")
 
     def find_profile_by_urn(self, profile_urn: str) -> Dict[str, Any]:
         """
@@ -798,11 +1155,11 @@ def send_to_neo4j(profiles: List[LinkedInProfile], companies: List[LinkedInCompa
         
         # Store companies first to ensure they exist
         print(f"Storing {len(companies)} companies in Neo4j...")
-        db.batch_store_companies(companies)
+        db.batch_store_chunked(db.batch_store_companies,companies)
         
         # Store profiles and their relationships
         print(f"Storing {len(profiles)} profiles in Neo4j...")
-        db.batch_store_profiles(profiles)
+        db.batch_store_chunked(db.batch_store_profiles,profiles)
         
         print("Successfully stored data in Neo4j database")
     finally:
@@ -883,10 +1240,10 @@ class Neo4jProfileAnalyzer:
         """
         query = """
         MATCH (p:Profile {urn: $profileUrn})-[:HAS_EXPERIENCE]->(e)-[:AT_COMPANY]->(c)
-        
+                
         WITH p, e, c
         ORDER BY e.startYear, e.startMonth
-        
+                
         WITH p, collect({
             title: e.title,
             company: c.name,
@@ -902,26 +1259,28 @@ class Neo4jProfileAnalyzer:
                     (e.endYear - e.startYear) * 12 + (e.endMonth - e.startMonth)
             END
         }) as experiences
-        
+                
         // Calculate average tenure
         WITH p, experiences,
-             reduce(total = 0, exp in [x in experiences WHERE x.duration IS NOT NULL] | total + exp.duration) / 
-             size([x in experiences WHERE x.duration IS NOT NULL]) as averageTenureMonths
-        
+            reduce(total = 0, exp in [x in experiences WHERE x.duration IS NOT NULL] | total + exp.duration) / 
+            size([x in experiences WHERE x.duration IS NOT NULL]) as averageTenureMonths
+                
         // Get education
         OPTIONAL MATCH (p)-[edu:ATTENDED]->(s:School)
         WITH p, experiences, averageTenureMonths, 
-             collect({school: s.name, degree: edu.degreeName, field: edu.fieldOfStudy}) as education
-        
+            collect({school: s.name, degree: edu.degreeName, field: edu.fieldOfStudy}) as education
+                
         // Get skills
         MATCH (p)-[:HAS_SKILL]->(skill)
-        
+        WITH p, experiences, averageTenureMonths, education, collect(skill.name) as skills
+                
+        // Final return with all calculations
         RETURN {
             profileName: p.firstName + ' ' + p.lastName,
             headline: p.headline,
             careerPath: experiences,
             education: education,
-            skills: collect(skill.name),
+            skills: skills,
             averageTenureMonths: averageTenureMonths,
             totalExperience: reduce(total = 0, exp in experiences | total + exp.duration),
             numberOfCompanies: size(experiences),
@@ -932,48 +1291,56 @@ class Neo4jProfileAnalyzer:
         results = self.db._run_query(query, {"profileUrn": profile_urn})
         return results[0]["analysis"] if results else {}
     
-    def get_company_talent_flow(self, company_urn: str, time_period: str = "1 YEAR") -> Dict[str, Any]:
+    def get_company_talent_flow(self, company_urn: str, time_period: str = "P1Y") -> Dict[str, Any]:
         """
         Analyze talent flow for a company over a specified time period.
         
         Args:
             company_urn: Company URN
-            time_period: Time period for analysis (e.g., "1 YEAR", "6 MONTHS")
+            time_period: Time period for analysis (ISO-8601 format) 
+            - "1 YEAR" → "P1Y"
+            - "6 MONTHS" → "P6M"
+            - "3 MONTHS" → "P3M"
+            - "1 MONTH" → "P1M"
+            - "1 WEEK" → "P7D"
             
         Returns:
             Dictionary with talent flow analysis
         """
         query = """
         MATCH (c:Company {urn: $companyUrn})
-        
+                
         // Calculate time threshold
-        WITH c, datetime() - duration('P' + $timePeriod) as cutoffDate
-        
+        WITH c, datetime() - duration($timePeriod) as cutoffDate
+                
         // Incoming transitions (people joining)
         OPTIONAL MATCH (p1:Profile)-[:HAS_TRANSITION]->(t1:Transition)-[:TO_COMPANY]->(c)
         WHERE datetime(t1.date) >= cutoffDate
         WITH c, cutoffDate, count(t1) as hiringCount
-        
+                
         // Outgoing transitions (people leaving)
         OPTIONAL MATCH (p2:Profile)-[:HAS_TRANSITION]->(t2:Transition)-[:FROM_COMPANY]->(c)
         WHERE datetime(t2.date) >= cutoffDate
         WITH c, cutoffDate, hiringCount, count(t2) as attritionCount
-        
+                
         // Calculate net talent flow
         WITH c, hiringCount, attritionCount, hiringCount - attritionCount as netTalentFlow
-        
+                
         // Get current employee count (approximation based on experiences)
         MATCH (p3:Profile)-[:HAS_EXPERIENCE]->(e3)-[:AT_COMPANY]->(c)
         WHERE e3.isCurrent = true OR e3.endYear IS NULL
-        
+
+        // Collect employee count before creating final return
+        WITH c, hiringCount, attritionCount, netTalentFlow, count(p3) as currentEmployeeCount
+                
         RETURN {
             companyName: c.name,
             companyUrn: c.urn,
             hiringCount: hiringCount,
             attritionCount: attritionCount,
             netTalentFlow: netTalentFlow,
-            currentEmployeeCount: count(p3),
-            talentFlowRate: round(100.0 * toFloat(netTalentFlow) / toFloat(count(p3) + 1), 2),
+            currentEmployeeCount: currentEmployeeCount,
+            talentFlowRate: round(100.0 * toFloat(netTalentFlow) / toFloat(currentEmployeeCount + 1), 2),
             timePeriod: $timePeriod
         } as analysis
         """
@@ -994,21 +1361,21 @@ class Neo4jProfileAnalyzer:
         WHERE s1 <> s2
         WITH s1, s2, count(p) as coOccurrence
         WHERE coOccurrence > 5  // Minimum co-occurrence threshold
-        
+
         // Calculate similarity score (Jaccard similarity)
         MATCH (pa:Profile)-[:HAS_SKILL]->(s1)
         WITH s1, s2, coOccurrence, count(pa) as s1Count
-        
+
         MATCH (pb:Profile)-[:HAS_SKILL]->(s2)
         WITH s1, s2, coOccurrence, s1Count, count(pb) as s2Count
-        
+
         WITH s1, s2, coOccurrence, s1Count, s2Count,
-             1.0 * coOccurrence / (s1Count + s2Count - coOccurrence) as similarity
+            1.0 * coOccurrence / (s1Count + s2Count - coOccurrence) as similarity
         WHERE similarity > 0.1  // Minimum similarity threshold
-        
+
         // Group skills into clusters using connected components
         WITH collect({skill1: s1.name, skill2: s2.name, similarity: similarity}) as skillPairs
-        
+
         CALL {
             WITH skillPairs
             UNWIND skillPairs as pair
@@ -1036,38 +1403,37 @@ class Neo4jProfileAnalyzer:
             )
             
             CALL gds.louvain.stream('skillGraph')
-            YIELD nodeId, communityId
+            YIELD nodeId as louvainNodeId, communityId
             
-            CALL gds.graph.nodeProperties.stream('skillGraph', ['communityId'])
-            YIELD nodeId, propertyValue as algorithmCommunityId
+            WITH louvainNodeId, communityId
             
             MATCH (s:SkillNode)
-            WHERE id(s) = nodeId
+            WHERE id(s) = louvainNodeId
             
-            RETURN s.name as skillName, algorithmCommunityId as clusterId
+            RETURN s.name as skillName, communityId as clusterId
         }
-        
+
         // Clean up temporary graph and nodes
         CALL gds.graph.drop('skillGraph')
         MATCH (s:SkillNode)
         DETACH DELETE s
-        
+
         // Group skills by cluster
         WITH skillName, clusterId
         ORDER BY clusterId, skillName
-        
+
         WITH clusterId, collect(skillName) as skills
         WHERE size(skills) > 2  // Only include clusters with at least 3 skills
-        
+
         // Identify most common skills for cluster naming
         MATCH (s:Skill)
         WHERE s.name IN skills
         OPTIONAL MATCH (p:Profile)-[:HAS_SKILL]->(s)
         WITH clusterId, skills, s, count(p) as popularity
         ORDER BY clusterId, popularity DESC
-        
+
         WITH clusterId, skills, collect(s.name)[0] as primarySkill
-        
+
         RETURN {
             clusterId: clusterId,
             clusterName: primarySkill + ' Cluster',
@@ -1163,7 +1529,7 @@ def generate_and_store_mock_data(num_profiles: int = 100):
     db = Neo4jDatabase()
     try:
         print(f"Storing {len(dataset['transitions'])} transitions in Neo4j...")
-        db.batch_store_transitions(dataset["transitions"])
+        db.batch_store_chunked(db.batch_store_transitions,dataset["transitions"])
     finally:
         db.close()
     
