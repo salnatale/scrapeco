@@ -1,5 +1,6 @@
 const express = require('express');
-const multer  = require('multer');
+const multer = require('multer');
+const FormData = require('form-data');
 require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
@@ -10,12 +11,12 @@ const port = process.env.PORT || 5001;
 const axios = require('axios');
 
 
-
+console.log("Starting Express server...");
 
 // Ensure the uploads directory exists
 const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)){
-    fs.mkdirSync(uploadDir);
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
 }
 
 const cors = require('cors');
@@ -36,19 +37,80 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // Endpoint for resume uploads
-app.post('/api/upload/resume', upload.single('file'), (req, res) => {
+app.post('/api/upload/resume', upload.single('file'), async (req, res) => {
+  console.log('/api/upload/resume endpoint hit');
   if (!req.file) {
     return res.status(400).send({ error: 'No file uploaded.' });
   }
-  res.json({ message: 'Resume uploaded successfully.', file: req.file.filename });
+
+  const uploadedFilePath = path.join(__dirname, 'uploads', req.file.filename);
+
+  try {
+    // Send file to FastAPI for processing
+    const form = new FormData();
+    form.append('file', fs.createReadStream(uploadedFilePath), req.file.originalname);
+
+    const fastApiRes = await axios.post(
+      'http://localhost:8000/api/upload/resume', // your FastAPI resume endpoint
+      form,
+      { headers: form.getHeaders() }
+    );
+
+    console.log('Resume processed by FastAPI:', fastApiRes.data);
+
+    // Respond to client
+    res.json({
+      message: 'Resume uploaded and processed successfully.',
+      file: req.file.filename,
+      fastApiResponse: fastApiRes.data
+    });
+
+  } catch (err) {
+    console.error('Failed to process resume via FastAPI:', err.message);
+    res.status(500).send({
+      error: 'Resume uploaded but processing failed.',
+      detail: err.message
+    });
+  }
 });
 
 // Endpoint for LinkedIn screenshot uploads
-app.post('/api/upload/linkedin', upload.single('file'), (req, res) => {
+app.post('/api/upload/linkedin', upload.single('file'), async (req, res) => {
+  console.log('/api/upload/linkedin endpoint hit');
   if (!req.file) {
     return res.status(400).send({ error: 'No file uploaded.' });
   }
-  res.json({ message: 'LinkedIn screenshot uploaded successfully.', file: req.file.filename });
+
+  const uploadedFilePath = path.join(__dirname, 'uploads', req.file.filename);
+
+  try {
+    // Send file to FastAPI for processing
+    const form = new FormData();
+    form.append('file', fs.createReadStream(uploadedFilePath), req.file.originalname);
+
+    const fastApiRes = await axios.post(
+      'http://localhost:8000/api/upload/linkedin', // fastAPI endpoint
+      form,
+      { headers: form.getHeaders() }
+    );
+
+    console.log('File processed by FastAPI:', fastApiRes.data);
+
+    // Respond back to client
+    res.json({
+      message: 'LinkedIn screenshot uploaded and processed successfully.',
+      file: req.file.filename,
+      fastApiResponse: fastApiRes.data
+    });
+    // error handling
+
+  } catch (err) {
+    console.error('Failed to process file via FastAPI:', err.message);
+    res.status(500).send({
+      error: 'File uploaded but processing failed.',
+      detail: err.message
+    });
+  }
 });
 
 app.listen(port, () => {
@@ -94,6 +156,21 @@ app.get('/auth/linkedin/callback', async (req, res) => {
 
     // Do something with profile/email (e.g., create user, session, etc.)
     console.log(profile, email);
+
+    const profileData = {
+      id: profile.id,
+      firstName: profile.localizedFirstName,
+      lastName: profile.localizedLastName,
+      email: email,
+      headline: profile.headline || '',
+      // Add more fields as needed -> determine what we can get from LinkedIn login,
+    };
+
+    // 🔁 Send to FastAPI backend
+    const fastApiRes = await axios.post('http://localhost:8000/api/db/store_profile', profileData);
+
+    console.log('✅ Sent to FastAPI:', fastApiRes.data);
+
 
     res.send(`<h2>Logged in as ${profile.localizedFirstName}</h2><p>Email: ${email}</p>`);
   } catch (err) {
