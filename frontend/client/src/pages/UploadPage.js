@@ -8,6 +8,12 @@ const UploadPage = () => {
   const handleTabChange = (_, newValue) => {
     setTabValue(newValue);
   };
+  const handleLinkedInLogin = () => {
+    const scope = 'r_liteprofile r_emailaddress';
+    const state = crypto.randomUUID(); // or hardcode for now
+    const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${linkedinClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${state}`;
+    window.location.href = authUrl;
+  };
 
   const resumeUploadEndpoint = 'http://localhost:5001/api/upload/resume';
   const linkedinUploadEndpoint = 'http://localhost:5001/api/upload/linkedin';

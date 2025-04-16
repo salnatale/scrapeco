@@ -56,6 +56,20 @@ const Navbar = () => {
           >
             LinkedIn Instructions
           </Button>
+          <Button
+            component={Link}
+            to="/login"
+            sx={{
+              backgroundColor: '#0A66C2', // LinkedIn blue
+              color: 'white',
+              mx: 1,
+              '&:hover': {
+                backgroundColor: '#004182' // darker blue on hover
+              }
+            }}
+          >
+            Linkedin Login
+          </Button>
         </Box>
       </Toolbar>
     </AppBar>
