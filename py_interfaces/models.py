@@ -1,12 +1,13 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any, Type, TypeVar
+from typing import List, Optional, Dict, Any, Type, TypeVar, Literal
 from datetime import datetime
 from pydantic import ValidationError
 
 
+
 class TimePeriod(BaseModel):
-    start_date: Optional[Dict[str, int]] = Field(None, alias="startDate")
-    end_date: Optional[Dict[str, int]] = Field(None, alias="endDate")
+    start_date: Optional[Dict[str, Optional[int]]] = Field(None, alias="startDate")
+    end_date: Optional[Dict[str, Optional[int]]] = Field(None, alias="endDate")
 
     class Config:
         populate_by_name = True
@@ -16,7 +17,7 @@ class Company(BaseModel):
     name: str = Field(..., alias="companyName")
     urn: Optional[str] = Field(None, alias="companyUrn")
     logo_url: Optional[str] = Field(None, alias="companyLogoUrl")
-    employee_count_range: Optional[Dict[str, int]] = Field(None, alias="employeeCountRange")
+    employee_count_range: Optional[Dict[str, Optional[int]]] = Field(None, alias="employeeCountRange")
     industries: Optional[List[str]] = None
 
     class Config:
@@ -38,7 +39,7 @@ class Experience(BaseModel):
     company: Company
     description: Optional[str] = None
     location: Optional[Location] = None
-    time_period: TimePeriod = Field(..., alias="timePeriod")
+    time_period: Optional[TimePeriod] = Field(..., alias="timePeriod")
     entity_urn: Optional[str] = Field(None, alias="entityUrn")
 
     class Config:
@@ -271,18 +272,18 @@ class CompanyType(BaseModel):
 
 class LinkedInCompany(BaseModel):
     name: str
-    tagline: str
-    description: str
+    tagline: Optional[str]
+    description: Optional[str]
     entity_urn: str = Field(..., alias="entityUrn")
-    universal_name: str = Field(..., alias="universalName")
-    company_page_url: str = Field(..., alias="companyPageUrl")
-    url: str
-    staffing_company: bool = Field(..., alias="staffingCompany")
-    company_industries: List[CompanyIndustry] = Field(..., alias="companyIndustries")
-    staff_count: int = Field(..., alias="staffCount")
-    staff_count_range: Dict[str, int] = Field(..., alias="staffCountRange")
-    permissions: CompanyPermissions
-    logo: CompanyImage
+    universal_name: Optional[str] = Field(..., alias="universalName")
+    company_page_url: Optional[str] = Field(..., alias="companyPageUrl")
+    url: Optional[str]
+    staffing_company: Optional[bool] = Field(..., alias="staffingCompany")
+    company_industries: Optional[List[CompanyIndustry]] = Field(..., alias="companyIndustries")
+    staff_count: Optional[int] = Field(..., alias="staffCount")
+    staff_count_range: Optional[Dict[str, Optional[int]]] = Field(..., alias="staffCountRange")
+    permissions: Optional[CompanyPermissions]
+    logo: Optional[CompanyImage]
     following_info: FollowingInfo = Field(..., alias="followingInfo")
     funding_data: Optional[FundingData] = Field(None, alias="fundingData")
     company_type: CompanyType = Field(..., alias="companyType")
@@ -305,3 +306,49 @@ class LinkedInCompany(BaseModel):
     #     @classmethod
     #     def parse_raw_model(cls, raw_data: Dict[str, Any]) -> "LinkedInCompany":
     #         return parse_raw_model(cls, raw_data)
+
+
+class TransitionEvent(BaseModel):
+    """
+    Represents a career transition extracted from a LinkedIn profile.
+
+    • transition_type
+        - 'company_change'  → company A ➜ company B (title may change)
+        - 'promotion'       → same company, higher title
+    """
+
+    profile_urn:       str  = Field(..., alias="profile_urn")
+    from_company_urn:  str  = Field(..., alias="from_company_urn")
+    to_company_urn:    str  = Field(..., alias="to_company_urn")
+
+    transition_date:   Optional[datetime | str] = Field(
+        ...,
+        alias="transition_date",
+        description="ISO‑8601 date of the first day in the new role "
+                    "(string accepted for easy JSON ingestion)."
+    )
+
+    transition_type: Optional[Literal["company_change", "promotion"]] = Field(
+        ..., alias="transition_type"
+    )
+
+    old_title:         Optional[str]  = Field(..., alias="old_title")
+    new_title:         Optional[str]  = Field(..., alias="new_title")
+
+    location_change:   Optional[bool] = Field(..., alias="location_change",
+                                    description="True if locationName differs.")
+    tenure_days:       Optional[int]  = Field(..., alias="tenure_days",
+                                    description="Days spent in the *old* role.")
+
+    class Config:
+        populate_by_name = True          # allow both snake_case & alias input
+        json_encoders = {datetime: lambda dt: dt.isoformat()}  # clean JSON out
+
+    # ————— Convenience helpers —————
+    @property
+    def is_promotion(self) -> bool:
+        return self.transition_type == "promotion"
+
+    @property
+    def is_external_move(self) -> bool:
+        return self.transition_type == "company_change"

@@ -6,9 +6,10 @@ import os
 import json
 import uvicorn
 from datetime import datetime
+from parser import raw_text_from_upload, text_to_profile, transitions_from_profile, check_companies
 
 # Import your existing modules
-from models import LinkedInProfile, LinkedInCompany
+from models import LinkedInProfile, LinkedInCompany, TransitionEvent
 from neo4j_database import Neo4jDatabase, send_to_neo4j, send_transition_to_neo4j, query_neo4j
 from druid_database import send_to_druid, send_transition_update
 from main import LinkedInAPI
@@ -40,17 +41,6 @@ class ProfileRequest(BaseModel):
 class SearchRequest(BaseModel):
     query: Dict[str, Any]
     description: Optional[str] = None
-
-class TransitionEvent(BaseModel):
-    profile_urn: str
-    from_company_urn: str
-    to_company_urn: str
-    transition_date: str
-    transition_type: str
-    old_title: str
-    new_title: str
-    location_change: bool
-    tenure_days: int
 
 class MockGenerationConfig(BaseModel):
     num_profiles: int = 10
@@ -133,6 +123,18 @@ async def custom_query(query: Dict[str, Any]):
     results = query_neo4j(query["cypher"], query.get("params", {}))
     return {"results": results}
 
+@app.post("/api/db/clear")
+async def clear_database():
+    """Clear all data from Neo4j and Druid databases"""
+    try:
+        db = Neo4jDatabase()
+        db.clear_database()
+        db.close()
+        
+        return {"success": True, "message": "Database cleared successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error clearing database: {str(e)}")
+
 # Mock data generation endpoints
 # @app.post("/api/mock/generate_profiles")
 # async def generate_mock_profiles(config: MockGenerationConfig):
@@ -186,14 +188,48 @@ async def upload_resume(file: UploadFile = File(...)):
         content = await file.read()
         f.write(content)
     
-    # Here you would process the resume (OCR, data extraction, etc.)
-    # This is a placeholder for your actual implementation
+    # Read file content as buffer from the saved file location
+    with open(file_path, "rb") as f:
+        fp = f.read()
+
+    # 1) OCR / text extraction
+    try:
+        text = raw_text_from_upload(file.filename, fp)
+    except ValueError as e:
+        raise HTTPException(status_code=415, detail=str(e))
+
+    # 2) LLM → structured profile
+    try:
+        profile = text_to_profile(text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM parsing failed: {e}")
+    
+    # ensure valid companies and company urns, set unique if not provided, and exists in db. Modifies in place. 
+    check_companies(profile)
+    
+    # Structured profile -> Generate Transitions.
+    try: 
+        transitions = transitions_from_profile(profile)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transition generation failed: {e}")
+        
+    # try Db upload
+    try: 
+        db = Neo4jDatabase()
+        # Store profile and transitions.
+        db.store_profile(profile)
+        for transition in transitions:
+            db.store_transition(transition)
+        db.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database storage failed: {e}")
     
     return {
         "success": True,
         "filename": file.filename,
         "path": file_path,
-        "message": "Resume uploaded successfully. Processing will occur asynchronously."
+        "message": "Resume uploaded and parsed successfully.",
+        "profile": profile.model_dump()
     }
 
 @app.post("/api/upload/linkedin")

@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from models import (
     LinkedInProfile, LinkedInCompany, Experience, 
-    Company, TimePeriod, Location, School, Education, Skill
+    Company, TimePeriod, Location, School, Education, Skill, TransitionEvent
 )
 from openai import OpenAI
 
@@ -840,7 +840,7 @@ class LinkedInDataGenerator:
                                 profile: Dict[str, Any],
                                 old_experience: Dict[str, Any],
                                 new_experience: Dict[str, Any],
-                                transition_type: str) -> Dict[str, Any]:
+                                transition_type: str) -> TransitionEvent:
         """
         Generate a transition event object for a job change or promotion.
 
@@ -856,7 +856,7 @@ class LinkedInDataGenerator:
         Returns:
             Transition event dictionary
         """
-        return {
+        return TransitionEvent(**{
             "transition_date": transition_date.isoformat(),
             "profile_urn": profile["profile_urn"],
             "from_company_urn": old_experience["company"]["companyUrn"],
@@ -870,7 +870,7 @@ class LinkedInDataGenerator:
                 old_experience["timePeriod"]["startDate"]["month"],
                 1
             )).days
-        }
+        })
     # ______________________________________________________
     # mass generation functions for creating realistic mock data
     # ______________________________________________________

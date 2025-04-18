@@ -9,7 +9,7 @@ from neo4j.exceptions import ServiceUnavailable, AuthError
 # Import your existing models
 from models import (
     LinkedInProfile, LinkedInCompany, Experience, 
-    Company, TimePeriod, Location, School, Education, Skill
+    Company, TimePeriod, Location, School, Education, Skill, TransitionEvent
 )
 
 # Load environment variables
@@ -393,7 +393,7 @@ class Neo4jDatabase:
             "locationName": location_name
         })
 
-    def store_transition(self, transition_event: Dict[str, Any]):
+    def store_transition(self, transition_event: Union[TransitionEvent, dict]):
         """
         Store a job transition event in the Neo4j database.
         
@@ -420,7 +420,10 @@ class Neo4jDatabase:
         
         RETURN t
         """
-        
+        transition_event = (transition_event.model_dump()            # if it **is** a model …
+            if isinstance(transition_event, TransitionEvent)
+            else transition_event)  
+          
         # Format transition date
         transition_date = transition_event["transition_date"]
         if isinstance(transition_date, str):
@@ -754,7 +757,7 @@ class Neo4jDatabase:
             
         print(f"Successfully stored {len(company_dicts)} companies with their industries")
     
-    def batch_store_transitions(self, transitions: List[Dict[str, Any]]):
+    def batch_store_transitions(self, transitions: List[Union[TransitionEvent,Dict]]):
         """
         Store multiple job transition events in Neo4j efficiently using batch operations.
         
@@ -765,27 +768,28 @@ class Neo4jDatabase:
         transition_dicts = []
         
         for transition in transitions:
-            # Format transition date if needed
-            transition_date = transition.get("transition_date")
-            if transition_date:
-                if isinstance(transition_date, str):
-                    # If it's already a string, ensure it's in ISO format
-                    if "T" not in transition_date:
-                        transition_date = f"{transition_date}T00:00:00"
-                else:
-                    # If it's a datetime object, convert to ISO format string
-                    transition_date = transition_date.isoformat()
-                    
+            data = (transition.model_dump(by_alias=True)
+                    if isinstance(transition, TransitionEvent)
+                    else transition)
+
+            # –– normalise the date once –––––––––––––––––––––––
+            td = data["transition_date"]
+            if isinstance(td, str):
+                td = td if "T" in td else f"{td}T00:00:00"
+            else:
+                td = td.isoformat()
+
+            # –– build the dict that Neo4j will consume ––––––––
             transition_dict = {
-                "profileUrn": transition.get("profile_urn"),
-                "fromCompanyUrn": transition.get("from_company_urn"),
-                "toCompanyUrn": transition.get("to_company_urn"),
-                "transitionDate": transition_date,
-                "transitionType": transition.get("transition_type"),
-                "oldTitle": transition.get("old_title"),
-                "newTitle": transition.get("new_title"),
-                "locationChange": transition.get("location_change", False),
-                "tenureDays": transition.get("tenure_days", 0)
+                "profileUrn":     data["profile_urn"],
+                "fromCompanyUrn": data["from_company_urn"],
+                "toCompanyUrn":   data["to_company_urn"],
+                "transitionDate": td,
+                "transitionType": data["transition_type"],
+                "oldTitle":       data["old_title"],
+                "newTitle":       data["new_title"],
+                "locationChange": data.get("location_change", False),
+                "tenureDays":     data.get("tenure_days", 0),
             }
             
             # Only add if we have the minimum required data
@@ -1166,7 +1170,7 @@ def send_to_neo4j(profiles: List[LinkedInProfile], companies: List[LinkedInCompa
         # Ensure database connection is closed
         db.close()
 
-def send_transition_to_neo4j(transition_event: Dict[str, Any]) -> bool:
+def send_transition_to_neo4j(transition_event: TransitionEvent) -> bool:
     """
     Send a transition event to Neo4j.
     Compatible with the existing send_transition_update function interface.
