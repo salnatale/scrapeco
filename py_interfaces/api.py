@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union,Literal
 import os
 import json
 import uvicorn
@@ -14,6 +14,9 @@ from neo4j_database import Neo4jDatabase, send_to_neo4j, send_transition_to_neo4
 from druid_database import send_to_druid, send_transition_update
 from main import LinkedInAPI
 from mock_enhanced import LinkedInDataGenerator
+import glob
+from tqdm import tqdm
+import pandas as pd
 
 # Initialize the FastAPI app
 app = FastAPI(
@@ -47,12 +50,99 @@ class MockGenerationConfig(BaseModel):
     store_in_db: bool = True
     career_distribution: Optional[Dict[str, float]] = None
     education_distribution: Optional[Dict[str, float]] = None
+    
+# define pagerank models
+class ProjectionRequest(BaseModel):
+    graph_name: str = "empCompany"
+    weight_scheme: Literal["count", "binary"] = "count"
+    delete_existing: bool = False
+
+class PageRankRequest(BaseModel):
+    graph_name: str = "empCompany"
+    damping: float = 0.85
+    iterations: int = 20
+    write_property: Optional[str] = None          # None ⇒ stream to JSON
+
+class BiRankRequest(BaseModel):
+    graph_name: str = "empCompany"
+    alpha: float = 0.85
+    beta: float = 0.85
+    max_iter: int = 20
+    write_prefix: Optional[str] = None            # None ⇒ stream to JSON
 
 # Routes for health check
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "LinkedIn Data API is running"}
 
+@app.post("/api/process_corpus")
+async def process_corpus(folder_path: str):
+    """
+    Process a local folder of .txt files and batch store parsed LinkedIn profiles and transitions.
+    Each file is expected to be plain text.
+    """
+    if not os.path.exists(folder_path):
+        raise HTTPException(status_code=404, detail="Folder path not found")
+
+    file_paths = glob.glob(os.path.join(folder_path, "*.txt"))
+    if not file_paths:
+        raise HTTPException(status_code=404, detail="No .txt files found in the directory")
+    file_paths = file_paths[:100]  # Limit to first 100 files for performance
+    processed_profiles = []
+    all_transitions = []
+    failed = []
+
+    for i, path in enumerate(file_paths):
+        filename = os.path.basename(path)
+        print(f"[{i+1}/{len(file_paths)}] Processing {filename}")
+
+        try:
+            with open(path, "rb") as f:
+                fp = f.read()
+
+            # 1) OCR / text extraction
+            text = raw_text_from_upload(filename, fp)
+
+            # 2) Parse text into structured profile
+            profile = text_to_profile(text)
+
+            # 3) Check companies and enrich profile
+            check_companies(profile)
+
+            # 4) Generate career transitions
+            transitions = transitions_from_profile(profile)
+
+            # Add to batch lists
+            processed_profiles.append(profile)
+            all_transitions.extend(transitions)
+
+            print(f"[SUCCESS] Processed {filename}")
+
+        except Exception as e:
+            print(f"[ERROR] Failed processing {filename}: {e}")
+            failed.append({"filename": filename, "error": str(e)})
+            continue
+
+    # 🔁 Batch Store Profiles & Transitions
+    try:
+        db = Neo4jDatabase()
+        if processed_profiles:
+            db.batch_store_profiles(processed_profiles)
+        if all_transitions:
+            db.batch_store_transitions(all_transitions)
+        db.close()
+        print("[DB] Batch storage complete.")
+    except Exception as db_err:
+        raise HTTPException(status_code=500, detail=f"Batch DB store failed: {db_err}")
+
+    return {
+        "summary": {
+            "total": len(file_paths),
+            "processed": len(processed_profiles),
+            "transitions": len(all_transitions),
+            "failed": len(failed),
+        }
+    }
 # # LinkedIn profile endpoints
 # @app.post("/api/profile")
 # async def get_profile(request: ProfileRequest):
@@ -134,6 +224,104 @@ async def clear_database():
         return {"success": True, "message": "Database cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error clearing database: {str(e)}")
+
+# ----- Graph Ranking Endpoints -------- ##
+# ─────────────────── Graph‑ranking endpoints ──────────────────────────
+
+@app.post("/api/graph/projection")
+async def build_projection(req: ProjectionRequest):
+    """
+    (Re)create the collapsed Employee ↔ Company projection in GDS.
+    """
+    try:
+        db = Neo4jDatabase()
+        db.create_emp_company_projection(
+            graph_name=req.graph_name,
+            weight_scheme=req.weight_scheme,
+            delete_existing=req.delete_existing,
+        )
+        db.close()
+        return {"success": True, "graph": req.graph_name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Projection failed: {e}")
+
+
+@app.post("/api/graph/pagerank")
+async def run_pagerank(req: PageRankRequest):
+    """
+    Run native GDS PageRank on the collapsed projection.
+    If *write_property* is provided, scores are stored on the graph and an
+    empty list is returned.  Otherwise results stream back as JSON.
+    """
+    try:
+        db = Neo4jDatabase()
+        df = db.pagerank_emp_company(
+            graph_name=req.graph_name,
+            damping=req.damping,
+            iterations=req.iterations,
+            write_property=req.write_property,
+        )
+        db.close()
+        records = df.to_dict("records") if not req.write_property else []
+        return {
+            "success": True,
+            "graph": req.graph_name,
+            "mode": "write" if req.write_property else "stream",
+            "results": records,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PageRank failed: {e}")
+
+
+@app.post("/api/graph/birank")
+async def run_birank(req: BiRankRequest):
+    """
+    Run BiRank (degree‑balanced) on the collapsed projection.
+    Works exactly like the PageRank endpoint.
+    """
+    try:
+        db = Neo4jDatabase()
+        df = db.birank_emp_company(
+            graph_name=req.graph_name,
+            alpha=req.alpha,
+            beta=req.beta,
+            max_iter=req.max_iter,
+            write_prefix=req.write_prefix,
+        )
+        db.close()
+        records = df.to_dict("records") if not req.write_prefix else []
+        return {
+            "success": True,
+            "graph": req.graph_name,
+            "mode": "write" if req.write_prefix else "stream",
+            "results": records,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"BiRank failed: {e}")
+
+
+@app.get("/api/graph/rankings")
+async def fetch_rankings(
+    property_name: str,
+    label: Optional[str] = None,
+    limit: int = 20,
+):
+    """
+    Quick leaderboard for any stored ranking property (e.g. pr, br_emp, br_comp).
+    Optionally restrict to a single label (Employee / Company).
+    """
+    label_clause = f":{label}" if label else ""
+    cypher = (
+    f"MATCH (n{label_clause}) "
+    f"WHERE n.`{property_name}` IS NOT NULL "          # ← replace exists(...)
+    f"RETURN n.name AS name, n.`{property_name}` AS score "
+    f"ORDER BY score DESC LIMIT $limit"
+)
+    try:
+        rows = query_neo4j(cypher, {"limit": limit})
+        return {"property": property_name, "results": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fetch failed: {e}")
 
 # Mock data generation endpoints
 # @app.post("/api/mock/generate_profiles")

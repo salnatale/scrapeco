@@ -54,8 +54,8 @@ except Exception as e:
     print(e)
     print("Proxy failed")
     proxies = None
-    response = requests.get("https://httpbin.org/ip")
-    print(response.json())
+    # response = requests.get("https://httpbin.org/ip")
+    # print(response.json()) # httpbin not working for some reason
 # test proxy
 
 class LinkedInAPI:
