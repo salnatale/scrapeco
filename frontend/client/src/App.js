@@ -4,6 +4,7 @@ import HomePage from './pages/HomePage';
 import UploadPage from './pages/UploadPage';
 import LoginPage from './pages/LoginPage'
 import LinkedinInstructionsPage from './pages/LinkedinInstructionsPage';
+import ResultsPage from './pages/ResultsPage';
 import Navbar from './components/Navbar';
 
 const App = () => {
@@ -15,6 +16,7 @@ const App = () => {
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/linkedin-instructions" element={<LinkedinInstructionsPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/results" element={<ResultsPage />} />
       </Routes>
     </>
   );
