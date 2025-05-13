@@ -1,4 +1,9 @@
-venv
+# all different top level venvs
+venv*/
+env/
+.venv/
+.env_v*/ 
+ 
 .env
 BrightData SSL certificate (port 33335).crt
 

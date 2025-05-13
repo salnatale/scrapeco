@@ -216,7 +216,13 @@ class Neo4jDatabase:
 
         rows, cols, data = [], [], []
         for r in edges:
-            s, t,= r["s"], r["t"]
+            (
+                s,
+                t,
+            ) = (
+                r["s"],
+                r["t"],
+            )
             if s in ei and t in ci:
                 rows.append(ei[s])
                 cols.append(ci[t])
@@ -686,69 +692,102 @@ class Neo4jDatabase:
             },
         )
 
-    # add batch methods for ease of use
-    # def batch_store_profiles(self, profiles: List[LinkedInProfile]):
-    #     """
-    #     Store multiple LinkedIn profiles in the Neo4j database.
-
-    #     Args:
-    #         profiles: List of LinkedInProfile model instances
-    #     """
-    #     for profile in profiles:
-    #         self.store_profile(profile)
-
     def batch_store_profiles(self, profiles: List[LinkedInProfile]):
         """
         Complete batch processing solution for storing LinkedIn profiles in Neo4j.
+        Added defensive programming to prevent failures when processing bad data.
 
         Args:
             profiles: List of LinkedInProfile model instances
         """
         # Process profile nodes first
         profile_dicts = []
-        for profile in profiles:
-            profile_data = (
-                profile.model_dump() if hasattr(profile, "model_dump") else profile
-            )
-            profile_dicts.append(
-                {
-                    "urn": profile_data["profile_urn"],
-                    "profileId": profile_data["profile_id"],
-                    "firstName": profile_data["first_name"],
-                    "lastName": profile_data["last_name"],
-                    "headline": profile_data.get("headline"),
-                    "summary": profile_data.get("summary"),
-                    "locationName": profile_data.get("location_name"),
-                    "industryName": profile_data.get("industry_name"),
-                    "publicId": profile_data.get("public_id"),
-                }
-            )
+
+        # Track errors for logging
+        errors = []
+        processed_profiles = 0
+
+        for i, profile in enumerate(profiles):
+            try:
+                # Handle None profiles
+                if profile is None:
+                    errors.append(f"Profile at index {i} is None, skipping")
+                    continue
+
+                profile_data = (
+                    profile.model_dump() if hasattr(profile, "model_dump") else profile
+                )
+
+                # Handle None profile_data
+                if profile_data is None:
+                    errors.append(
+                        f"Profile data at index {i} is None after model_dump, skipping"
+                    )
+                    continue
+
+                # Check for required fields
+                required_fields = [
+                    "profile_urn",
+                    "profile_id",
+                    "first_name",
+                    "last_name",
+                ]
+                missing_fields = [f for f in required_fields if f not in profile_data]
+
+                if missing_fields:
+                    errors.append(
+                        f"Profile at index {i} missing required fields: {', '.join(missing_fields)}"
+                    )
+                    continue
+
+                # All checks passed, add to profile_dicts
+                profile_dicts.append(
+                    {
+                        "urn": profile_data["profile_urn"],
+                        "profileId": profile_data["profile_id"],
+                        "firstName": profile_data["first_name"],
+                        "lastName": profile_data["last_name"],
+                        "headline": profile_data.get("headline"),
+                        "summary": profile_data.get("summary"),
+                        "locationName": profile_data.get("location_name"),
+                        "industryName": profile_data.get("industry_name"),
+                        "publicId": profile_data.get("public_id"),
+                    }
+                )
+                processed_profiles += 1
+
+            except Exception as e:
+                errors.append(f"Error processing profile at index {i}: {str(e)}")
+                continue
 
         # Create all Profile nodes in a single batch operation
         if profile_dicts:
-            create_profiles_query = """
-            UNWIND $profiles AS profile
-            MERGE (p:Profile {urn: profile.urn})
-            ON CREATE SET 
-                p.profileId = profile.profileId,
-                p.firstName = profile.firstName,
-                p.lastName = profile.lastName,
-                p.headline = profile.headline,
-                p.summary = profile.summary,
-                p.locationName = profile.locationName,
-                p.industryName = profile.industryName,
-                p.publicId = profile.publicId,
-                p.createdAt = datetime()
-            ON MATCH SET
-                p.firstName = profile.firstName,
-                p.lastName = profile.lastName,
-                p.headline = profile.headline,
-                p.summary = profile.summary,
-                p.locationName = profile.locationName,
-                p.industryName = profile.industryName,
-                p.updatedAt = datetime()
-            """
-            self._run_query(create_profiles_query, {"profiles": profile_dicts})
+            try:
+                create_profiles_query = """
+                UNWIND $profiles AS profile
+                MERGE (p:Profile {urn: profile.urn})
+                ON CREATE SET 
+                    p.profileId = profile.profileId,
+                    p.firstName = profile.firstName,
+                    p.lastName = profile.lastName,
+                    p.headline = profile.headline,
+                    p.summary = profile.summary,
+                    p.locationName = profile.locationName,
+                    p.industryName = profile.industryName,
+                    p.publicId = profile.publicId,
+                    p.createdAt = datetime()
+                ON MATCH SET
+                    p.firstName = profile.firstName,
+                    p.lastName = profile.lastName,
+                    p.headline = profile.headline,
+                    p.summary = profile.summary,
+                    p.locationName = profile.locationName,
+                    p.industryName = profile.industryName,
+                    p.updatedAt = datetime()
+                """
+                self._run_query(create_profiles_query, {"profiles": profile_dicts})
+            except Exception as e:
+                errors.append(f"Error creating profile nodes: {str(e)}")
 
         # Process skills
         all_skills = []
@@ -758,191 +797,439 @@ class Neo4jDatabase:
         all_companies = []
         all_experiences = []
 
-        for profile in profiles:
-            profile_data = (
-                profile.model_dump() if hasattr(profile, "model_dump") else profile
-            )
-            profile_urn = profile_data["profile_urn"]
+        for i, profile in enumerate(profiles):
+            try:
+                # Handle None profiles
+                if profile is None:
+                    continue
 
-            # Collect skills
-            if "skills" in profile_data and profile_data["skills"]:
-                for skill in profile_data["skills"]:
-                    all_skills.append(
-                        {"profileUrn": profile_urn, "skillName": skill["name"]}
-                    )
+                profile_data = (
+                    profile.model_dump() if hasattr(profile, "model_dump") else profile
+                )
 
-            # Collect education
-            if "education" in profile_data and profile_data["education"]:
-                for edu in profile_data["education"]:
-                    school = edu["school"]
-                    school_urn = (
-                        school.get("urn")
-                        or f"urn:li:school:{school['name'].replace(' ', '').lower()}"
-                    )
+                # Handle None profile_data
+                if profile_data is None:
+                    continue
 
-                    time_period = edu["time_period"]
-                    start_date = time_period.get("start_date", {}) or {}
-                    end_date = time_period.get("end_date", {}) or {}
+                # Skip if no profile_urn
+                if "profile_urn" not in profile_data:
+                    continue
 
-                    all_education.append(
-                        {
-                            "profileUrn": profile_urn,
-                            "schoolUrn": school_urn,
-                            "schoolName": school["name"],
-                            "active": school.get("active", True),
-                            "degreeName": edu.get("degree_name"),
-                            "fieldOfStudy": edu.get("field_of_study"),
-                            "startYear": start_date.get("year"),
-                            "startMonth": start_date.get("month"),
-                            "endYear": end_date.get("year"),
-                            "endMonth": end_date.get("month"),
-                        }
-                    )
+                profile_urn = profile_data["profile_urn"]
 
-            # Collect experience and companies
-            if "experience" in profile_data and profile_data["experience"]:
-                for exp in profile_data["experience"]:
-                    company_data = exp["company"]
-                    company_urn = (
-                        company_data.get("urn")
-                        or company_data.get("companyUrn")
-                        or f"urn:li:company:{company_data['name'].replace(' ', '').lower()}"
-                    )
+                # Collect skills - defensively
+                if "skills" in profile_data and profile_data["skills"]:
+                    for skill_idx, skill in enumerate(profile_data["skills"]):
+                        try:
+                            if not isinstance(skill, dict):
+                                continue
 
-                    # Add company
-                    all_companies.append(
-                        {
-                            "urn": company_urn,
-                            "name": company_data.get("name")
-                            or company_data.get("companyName"),
-                        }
-                    )
+                            if "name" not in skill:
+                                continue
 
-                    # Add experience
-                    time_period = exp["time_period"]
-                    start_date = time_period.get("start_date", {}) or {}
-                    end_date = time_period.get("end_date", {}) or {}
-                    is_current = not end_date or not (
-                        end_date.get("year") and end_date.get("month")
-                    )
+                            all_skills.append(
+                                {"profileUrn": profile_urn, "skillName": skill["name"]}
+                            )
+                        except Exception as e:
+                            errors.append(
+                                f"Error processing skill at index {skill_idx} for profile {profile_urn}: {str(e)}"
+                            )
 
-                    location = exp.get("location", {}) or {}
-                    location_name = None
-                    if location:
-                        location_name = location.get("name") or location.get(
-                            "locationName"
-                        )
+                # Collect education - defensively
+                # In batch_store_profiles - education collection section
+                if "education" in profile_data and profile_data["education"]:
+                    for edu_idx, edu in enumerate(profile_data["education"]):
+                        try:
+                            # Check required keys - REMOVED mandatory school check
+                            school = edu.get("school", {})
 
-                    exp_urn = (
-                        exp.get("entity_urn")
-                        or exp.get("entityUrn")
-                        or f"exp-{profile_urn}-{company_urn}-{start_date.get('year')}-{start_date.get('month')}"
-                    )
+                            # Handle None school or string school
+                            if not school:
+                                if isinstance(edu.get("schoolName"), str):
+                                    school = {"name": edu.get("schoolName")}
+                                else:
+                                    continue
+                            elif not isinstance(school, dict):
+                                if isinstance(school, str):
+                                    school = {"name": school}
+                                else:
+                                    continue
 
-                    all_experiences.append(
-                        {
-                            "profileUrn": profile_urn,
-                            "companyUrn": company_urn,
-                            "expUrn": exp_urn,
-                            "title": exp["title"],
-                            "description": exp.get("description", ""),
-                            "startYear": start_date.get("year"),
-                            "startMonth": start_date.get("month"),
-                            "endYear": end_date.get("year"),
-                            "endMonth": end_date.get("month"),
-                            "isCurrent": is_current,
-                            "locationName": location_name,
-                        }
-                    )
+                            # Ensure school has a name - try both keys
+                            school_name = None
+                            if isinstance(school, dict):
+                                school_name = school.get("name") or school.get(
+                                    "schoolName"
+                                )
+
+                            if not school_name:
+                                continue
+
+                            # Generate school URN safely
+                            school_urn = None
+                            if isinstance(school, dict):
+                                school_urn = school.get("urn") or school.get(
+                                    "schoolUrn"
+                                )
+
+                            if not school_urn:
+                                school_urn = f"urn:li:school:{school_name.replace(' ', '').lower()}"
+
+                            # Get time_period safely (handle both snake_case and camelCase)
+                            time_period = (
+                                edu.get("time_period", {})
+                                or edu.get("timePeriod", {})
+                                or {}
+                            )
+
+                            # Handle non-dict time_period or missing time_period
+                            if not isinstance(time_period, dict):
+                                time_period = {}
+
+                            # process appending to all_education
+                            all_education.append(
+                                {
+                                    "profileUrn": profile_urn,
+                                    "schoolUrn": school_urn,
+                                    "schoolName": school_name,
+                                    "degreeName": edu.get("degree_name")
+                                    or edu.get("degreeName")
+                                    or "",
+                                    "fieldOfStudy": edu.get("field_of_study")
+                                    or edu.get("fieldOfStudy")
+                                    or "",
+                                    "startYear": time_period.get("start_year")
+                                    or time_period.get("startYear"),
+                                    "startMonth": time_period.get("start_month")
+                                    or time_period.get("startMonth"),
+                                    "endYear": time_period.get("end_year")
+                                    or time_period.get("endYear"),
+                                    "endMonth": time_period.get("end_month")
+                                    or time_period.get("endMonth"),
+                                }
+                            )
+
+                        except Exception as e:
+                            errors.append(
+                                f"Error processing education at index {edu_idx} for profile {profile_urn}: {str(e)}"
+                            )
+                            continue
+
+                # Collect experience and companies - defensively
+                if "experience" in profile_data and profile_data["experience"]:
+                    for exp_idx, exp in enumerate(profile_data["experience"]):
+                        try:
+                            # First check if experience exists and is a dict
+                            if not exp or not isinstance(exp, dict):
+                                continue
+
+                            # Handle company safely
+                            company_data = exp.get("company")
+                            if not company_data:
+                                continue
+
+                            if not isinstance(company_data, dict):
+                                # Try to handle case where company might be a string
+                                if isinstance(company_data, str):
+                                    company_data = {"name": company_data}
+                                else:
+                                    continue
+
+                            # Ensure company has a name through various possible keys
+                            company_name = (
+                                company_data.get("name")
+                                or company_data.get("companyName")
+                                or company_data.get("company_name")
+                            )
+
+                            if not company_name:
+                                continue
+
+                            # Generate company URN safely
+                            company_urn = (
+                                company_data.get("urn")
+                                or company_data.get("companyUrn")
+                                or company_data.get("company_urn")
+                                or f"urn:li:company:{company_name.replace(' ', '').lower()}"
+                            )
+
+                            # Add company safely
+                            all_companies.append(
+                                {
+                                    "urn": company_urn,
+                                    "name": company_name,
+                                }
+                            )
+
+                            # Get title with fallbacks
+                            title = (
+                                exp.get("title") or exp.get("role") or "Unknown Title"
+                            )
+
+                            # Handle time_period which could be completely missing
+                            time_period = exp.get("time_period") or exp.get(
+                                "timePeriod"
+                            )
+
+                            # Initialize empty dicts for dates if time_period is None
+                            if not time_period:
+                                start_date = {}
+                                end_date = {}
+                                is_current = True  # Assume current if no dates provided
+                            else:
+                                # Handle non-dict time_period
+                                if not isinstance(time_period, dict):
+                                    if isinstance(time_period, str):
+                                        # Try to parse string time periods like "2020-Present"
+                                        try:
+                                            if "-" in time_period:
+                                                parts = time_period.split("-")
+                                                start_year = int(parts[0].strip())
+                                                start_date = {"year": start_year}
+                                                end_date = (
+                                                    {}
+                                                    if "present" in parts[1].lower()
+                                                    else {"year": int(parts[1].strip())}
+                                                )
+                                            else:
+                                                start_date = {
+                                                    "year": int(time_period.strip())
+                                                }
+                                                end_date = {}
+                                        except:
+                                            # If parsing fails, use empty dicts
+                                            start_date = {}
+                                            end_date = {}
+                                    else:
+                                        # Not a dict or parsable string
+                                        start_date = {}
+                                        end_date = {}
+                                    is_current = not end_date
+                                else:
+                                    # Normal case - time_period is a dict
+                                    # Get date safely with multiple possible key formats
+                                    start_date = (
+                                        time_period.get("start_date")
+                                        or time_period.get("startDate")
+                                        or time_period.get("start")
+                                        or {}
+                                    )
+
+                                    # Handle non-dict start_date
+                                    if not isinstance(start_date, dict):
+                                        if isinstance(start_date, str):
+                                            # Try to parse string like "2020"
+                                            try:
+                                                start_date = {
+                                                    "year": int(start_date.strip())
+                                                }
+                                            except:
+                                                start_date = {}
+                                        else:
+                                            start_date = {}
+
+                                    end_date = (
+                                        time_period.get("end_date")
+                                        or time_period.get("endDate")
+                                        or time_period.get("end")
+                                        or {}
+                                    )
+
+                                    # Handle non-dict end_date
+                                    if not isinstance(end_date, dict):
+                                        if isinstance(end_date, str):
+                                            if end_date.lower() in [
+                                                "present",
+                                                "current",
+                                            ]:
+                                                end_date = {}
+                                            else:
+                                                # Try to parse string like "2022"
+                                                try:
+                                                    end_date = {
+                                                        "year": int(end_date.strip())
+                                                    }
+                                                except:
+                                                    end_date = {}
+                                        else:
+                                            end_date = {}
+
+                                    # Determine if current position
+                                    is_current = not end_date or not (
+                                        end_date.get("year") and end_date.get("month")
+                                    )
+
+                            # Get location safely
+                            location = exp.get("location") or {}
+                            if not isinstance(location, dict):
+                                if isinstance(location, str):
+                                    location = {"name": location}
+                                else:
+                                    location = {}
+
+                            location_name = None
+                            if location:
+                                location_name = location.get("name") or location.get(
+                                    "locationName"
+                                )
+
+                            # Generate experience URN safely, with fallbacks if data is missing
+                            start_year = start_date.get("year", "unknown")
+                            start_month = start_date.get("month", "unknown")
+                            exp_urn = (
+                                exp.get("entity_urn")
+                                or exp.get("entityUrn")
+                                or exp.get("urn")
+                                or f"exp-{profile_urn}-{company_urn}-{start_year}-{start_month}"
+                            )
+
+                            # Create the experience record
+                            all_experiences.append(
+                                {
+                                    "profileUrn": profile_urn,
+                                    "companyUrn": company_urn,
+                                    "expUrn": exp_urn,
+                                    "title": title,
+                                    "description": exp.get("description", ""),
+                                    "startYear": start_date.get("year"),
+                                    "startMonth": start_date.get("month"),
+                                    "endYear": end_date.get("year"),
+                                    "endMonth": end_date.get("month"),
+                                    "isCurrent": is_current,
+                                    "locationName": location_name,
+                                }
+                            )
+                        except Exception as e:
+                            errors.append(
+                                f"Error processing experience at index {exp_idx} for profile {profile_urn}: {str(e)}"
+                            )
+            except Exception as e:
+                errors.append(
+                    f"Error processing profile details at index {i}: {str(e)}"
+                )
 
         # Execute batch operations
+        failed_operations = 0
 
         # 1. Skills
         if all_skills:
-            skills_query = """
-            UNWIND $skills AS skill
-            MATCH (p:Profile {urn: skill.profileUrn})
-            MERGE (s:Skill {name: skill.skillName})
-            MERGE (p)-[r:HAS_SKILL]->(s)
-            """
-            self._run_query(skills_query, {"skills": all_skills})
+            try:
+                skills_query = """
+                UNWIND $skills AS skill
+                MATCH (p:Profile {urn: skill.profileUrn})
+                MERGE (s:Skill {name: skill.skillName})
+                MERGE (p)-[r:HAS_SKILL]->(s)
+                """
+                self._run_query(skills_query, {"skills": all_skills})
+            except Exception as e:
+                errors.append(f"Error creating skills: {str(e)}")
+                failed_operations += 1
 
         # 2. Schools and education
         if all_education:
-            education_query = """
-            UNWIND $education AS edu
-            
-            MERGE (s:School {urn: edu.schoolUrn})
-            ON CREATE SET
-                s.name = edu.schoolName,
-                s.active = edu.active
-            
-            MATCH (p:Profile {urn: edu.profileUrn})
-            MERGE (p)-[r:ATTENDED]->(s)
-            ON CREATE SET
-                r.degreeName = edu.degreeName,
-                r.fieldOfStudy = edu.fieldOfStudy,
-                r.startYear = edu.startYear,
-                r.startMonth = edu.startMonth,
-                r.endYear = edu.endYear,
-                r.endMonth = edu.endMonth
-            """
-            self._run_query(education_query, {"education": all_education})
+            try:
+                education_query = """
+                UNWIND $education AS edu
+                MERGE (s:School {urn: edu.schoolUrn})
+                ON CREATE SET
+                    s.name = edu.schoolName
+
+                WITH edu, s
+                MATCH (p:Profile {urn: edu.profileUrn})
+                MERGE (p)-[r:ATTENDED]->(s)
+                ON CREATE SET
+                    r.degreeName = edu.degreeName,
+                    r.fieldOfStudy = edu.fieldOfStudy,
+                    r.startYear = edu.startYear,
+                    r.startMonth = edu.startMonth,
+                    r.endYear = edu.endYear,
+                    r.endMonth = edu.endMonth
+                
+                """
+                self._run_query(education_query, {"education": all_education})
+            except Exception as e:
+                errors.append(f"Error creating education: {str(e)}")
+                failed_operations += 1
 
         # 3. Companies
         if all_companies:
-            companies_query = """
-            UNWIND $companies AS company
-            MERGE (c:Company {urn: company.urn})
-            ON CREATE SET
-                c.name = company.name,
-                c.createdAt = datetime()
-            ON MATCH SET
-                c.name = company.name,
-                c.updatedAt = datetime()
-            """
-            self._run_query(companies_query, {"companies": all_companies})
+            try:
+                companies_query = """
+                UNWIND $companies AS company
+                MERGE (c:Company {urn: company.urn})
+                ON CREATE SET
+                    c.name = company.name,
+                    c.createdAt = datetime()
+                ON MATCH SET
+                    c.name = company.name,
+                    c.updatedAt = datetime()
+                """
+                self._run_query(companies_query, {"companies": all_companies})
+            except Exception as e:
+                errors.append(f"Error creating companies: {str(e)}")
+                failed_operations += 1
 
         # 4. Experience
         if all_experiences:
-            experience_query = """
-            UNWIND $experiences AS exp
-            
-            MATCH (p:Profile {urn: exp.profileUrn})
-            MATCH (c:Company {urn: exp.companyUrn})
-            
-            MERGE (e:Experience {urn: exp.expUrn})
-            ON CREATE SET
-                e.title = exp.title,
-                e.description = exp.description,
-                e.startYear = exp.startYear,
-                e.startMonth = exp.startMonth,
-                e.endYear = exp.endYear,
-                e.endMonth = exp.endMonth,
-                e.isCurrent = exp.isCurrent,
-                e.locationName = exp.locationName,
-                e.createdAt = datetime()
-            ON MATCH SET
-                e.title = exp.title,
-                e.description = exp.description,
-                e.startYear = exp.startYear,
-                e.startMonth = exp.startMonth,
-                e.endYear = exp.endYear,
-                e.endMonth = exp.endMonth,
-                e.isCurrent = exp.isCurrent,
-                e.locationName = exp.locationName,
-                e.updatedAt = datetime()
-            
-            MERGE (p)-[r1:HAS_EXPERIENCE]->(e)
-            MERGE (e)-[r2:AT_COMPANY]->(c)
-            """
-            self._run_query(experience_query, {"experiences": all_experiences})
+            try:
+                experience_query = """
+                UNWIND $experiences AS exp
+                
+                MATCH (p:Profile {urn: exp.profileUrn})
+                MATCH (c:Company {urn: exp.companyUrn})
+                
+                MERGE (e:Experience {urn: exp.expUrn})
+                ON CREATE SET
+                    e.title = exp.title,
+                    e.description = exp.description,
+                    e.startYear = exp.startYear,
+                    e.startMonth = exp.startMonth,
+                    e.endYear = exp.endYear,
+                    e.endMonth = exp.endMonth,
+                    e.isCurrent = exp.isCurrent,
+                    e.locationName = exp.locationName,
+                    e.createdAt = datetime()
+                ON MATCH SET
+                    e.title = exp.title,
+                    e.description = exp.description,
+                    e.startYear = exp.startYear,
+                    e.startMonth = exp.startMonth,
+                    e.endYear = exp.endYear,
+                    e.endMonth = exp.endMonth,
+                    e.isCurrent = exp.isCurrent,
+                    e.locationName = exp.locationName,
+                    e.updatedAt = datetime()
+                
+                MERGE (p)-[r1:HAS_EXPERIENCE]->(e)
+                MERGE (e)-[r2:AT_COMPANY]->(c)
+                """
+                self._run_query(experience_query, {"experiences": all_experiences})
+            except Exception as e:
+                errors.append(f"Error creating experiences: {str(e)}")
+                failed_operations += 1
 
-        print(f"Successfully batched {len(profiles)} profiles with their relationships")
+        # Print summary statistics
+        print(f"Processed {processed_profiles}/{len(profiles)} profiles successfully.")
+        print(
+            f"Created {len(all_skills)} skills, {len(all_education)} education records, {len(all_companies)} companies, and {len(all_experiences)} experiences."
+        )
+
+        if errors:
+            print(f"Encountered {len(errors)} errors during processing:")
+            for i, error in enumerate(errors[:10]):  # Show only first 10 errors
+                print(f"  {i+1}. {error}")
+            if len(errors) > 10:
+                print(f"  ... and {len(errors) - 10} more errors")
+
+        if failed_operations > 0:
+            print(f"WARNING: {failed_operations} database operations failed!")
+        else:
+            print("All database operations completed successfully.")
 
     def batch_store_companies(self, companies: List[LinkedInCompany]):
         """
         Store multiple LinkedIn companies in Neo4j efficiently using batch operations.
+        Added defensive programming to prevent failures when processing bad data.
 
         Args:
             companies: List of LinkedInCompany model instances
@@ -951,104 +1238,174 @@ class Neo4jDatabase:
         company_dicts = []
         industry_relationships = []
 
-        for company in companies:
-            company_data = (
-                company.model_dump() if hasattr(company, "model_dump") else company
-            )
+        # Track errors for logging
+        errors = []
+        processed_companies = 0
 
-            # Extract primary company data
-            company_urn = (
-                company_data.get("entity_urn")
-                or company_data.get("entityUrn")
-                or company_data.get("urn")
-            )
+        for i, company in enumerate(companies):
+            try:
+                # Handle None companies
+                if company is None:
+                    errors.append(f"Company at index {i} is None, skipping")
+                    continue
 
-            # Skip if no valid URN
-            if not company_urn:
-                continue
+                company_data = (
+                    company.model_dump() if hasattr(company, "model_dump") else company
+                )
 
-            # Prepare company data
-            company_dict = {
-                "urn": company_urn,
-                "name": company_data.get("name"),
-                "description": company_data.get("description", ""),
-                "url": company_data.get("url", ""),
-                "staffCount": company_data.get("staff_count")
-                or company_data.get("staffCount")
-                or 0,
-                "staffCountRange": (
-                    json.dumps(
-                        company_data.get("staff_count_range")
-                        or company_data.get("staffCountRange")
-                        or {}
+                # Handle None company_data
+                if company_data is None:
+                    errors.append(
+                        f"Company data at index {i} is None after model_dump, skipping"
                     )
-                    if company_data.get("staff_count_range")
-                    or company_data.get("staffCountRange")
-                    else None
-                ),
-            }
+                    continue
 
-            company_dicts.append(company_dict)
+                # Extract primary company data
+                company_urn = (
+                    company_data.get("entity_urn")
+                    or company_data.get("entityUrn")
+                    or company_data.get("urn")
+                )
 
-            # Extract industry relationships
-            industries = []
-            if (
-                "company_industries" in company_data
-                and company_data["company_industries"]
-            ):
-                for industry in company_data["company_industries"]:
-                    industry_name = None
-                    if isinstance(industry, dict) and "localized_name" in industry:
-                        industry_name = industry["localized_name"]
-                    elif isinstance(industry, str):
-                        industry_name = industry
+                # Skip if no valid URN
+                if not company_urn:
+                    errors.append(f"Company at index {i} has no valid URN, skipping")
+                    continue
 
-                    if industry_name:
-                        industry_relationships.append(
-                            {"companyUrn": company_urn, "industryName": industry_name}
+                # Prepare company data
+                company_dict = {
+                    "urn": company_urn,
+                    "name": company_data.get("name") or "Unknown Company",
+                    "description": company_data.get("description", ""),
+                    "url": company_data.get("url", ""),
+                    "staffCount": company_data.get("staff_count")
+                    or company_data.get("staffCount")
+                    or 0,
+                    "staffCountRange": None,
+                }
+
+                # Safely process staff count range
+                try:
+                    staff_count_range = company_data.get(
+                        "staff_count_range"
+                    ) or company_data.get("staffCountRange")
+
+                    if staff_count_range and isinstance(staff_count_range, dict):
+                        company_dict["staffCountRange"] = json.dumps(staff_count_range)
+                except Exception as e:
+                    # Just don't set staffCountRange if there's an error
+                    errors.append(
+                        f"Error processing staff count range for company {company_urn}: {str(e)}"
+                    )
+
+                company_dicts.append(company_dict)
+                processed_companies += 1
+
+                # Extract industry relationships
+                if (
+                    "company_industries" in company_data
+                    and company_data["company_industries"]
+                ):
+                    try:
+                        for industry_idx, industry in enumerate(
+                            company_data["company_industries"]
+                        ):
+                            try:
+                                industry_name = None
+                                if (
+                                    isinstance(industry, dict)
+                                    and "localized_name" in industry
+                                ):
+                                    industry_name = industry["localized_name"]
+                                elif isinstance(industry, str):
+                                    industry_name = industry
+
+                                if industry_name:
+                                    industry_relationships.append(
+                                        {
+                                            "companyUrn": company_urn,
+                                            "industryName": industry_name,
+                                        }
+                                    )
+                            except Exception as e:
+                                errors.append(
+                                    f"Error processing industry at index {industry_idx} for company {company_urn}: {str(e)}"
+                                )
+                    except Exception as e:
+                        errors.append(
+                            f"Error processing industries for company {company_urn}: {str(e)}"
                         )
 
+            except Exception as e:
+                errors.append(f"Error processing company at index {i}: {str(e)}")
+
         # Execute batch operations
+        failed_operations = 0
 
         # 1. Create all Company nodes
         if company_dicts:
-            companies_query = """
-            UNWIND $companies AS company
-            MERGE (c:Company {urn: company.urn})
-            ON CREATE SET
-                c.name = company.name,
-                c.description = company.description,
-                c.url = company.url,
-                c.staffCount = company.staffCount,
-                c.staffCountRange = company.staffCountRange,
-                c.createdAt = datetime()
-            ON MATCH SET
-                c.name = company.name,
-                c.description = company.description,
-                c.url = company.url,
-                c.staffCount = company.staffCount,
-                c.staffCountRange = company.staffCountRange,
-                c.updatedAt = datetime()
-            """
-            self._run_query(companies_query, {"companies": company_dicts})
+            try:
+                companies_query = """
+                UNWIND $companies AS company
+                MERGE (c:Company {urn: company.urn})
+                ON CREATE SET
+                    c.name = company.name,
+                    c.description = company.description,
+                    c.url = company.url,
+                    c.staffCount = company.staffCount,
+                    c.staffCountRange = company.staffCountRange,
+                    c.createdAt = datetime()
+                ON MATCH SET
+                    c.name = company.name,
+                    c.description = company.description,
+                    c.url = company.url,
+                    c.staffCount = company.staffCount,
+                    c.staffCountRange = company.staffCountRange,
+                    c.updatedAt = datetime()
+                """
+                self._run_query(companies_query, {"companies": company_dicts})
+            except Exception as e:
+                errors.append(f"Error creating company nodes: {str(e)}")
+                failed_operations += 1
 
         # 2. Create Industry nodes and relationships
         if industry_relationships:
-            industries_query = """
-            UNWIND $industries AS industry
-            MATCH (c:Company {urn: industry.companyUrn})
-            MERGE (i:Industry {name: industry.industryName})
-            MERGE (c)-[r:IN_INDUSTRY]->(i)
-            """
-            self._run_query(industries_query, {"industries": industry_relationships})
+            try:
+                industries_query = """
+                UNWIND $industries AS industry
+                MATCH (c:Company {urn: industry.companyUrn})
+                MERGE (i:Industry {name: industry.industryName})
+                MERGE (c)-[r:IN_INDUSTRY]->(i)
+                """
+                self._run_query(
+                    industries_query, {"industries": industry_relationships}
+                )
+            except Exception as e:
+                errors.append(f"Error creating industry relationships: {str(e)}")
+                failed_operations += 1
 
+        # Print summary statistics
         print(
-            f"Successfully stored {len(company_dicts)} companies with their industries"
+            f"Processed {processed_companies}/{len(companies)} companies successfully."
         )
+        print(f"Created {len(industry_relationships)} industry relationships.")
+
+        if errors:
+            print(f"Encountered {len(errors)} errors during processing:")
+            for i, error in enumerate(errors[:10]):  # Show only first 10 errors
+                print(f"  {i+1}. {error}")
+            if len(errors) > 10:
+                print(f"  ... and {len(errors) - 10} more errors")
+
+        if failed_operations > 0:
+            print(f"WARNING: {failed_operations} database operations failed!")
+        else:
+            print("All database operations completed successfully.")
 
     def batch_store_transitions(self, transitions: List[Union[TransitionEvent, Dict]]):
         """
         Store multiple job transition events in Neo4j efficiently using batch operations.
+        Added defensive programming to prevent failures when processing bad data.
 
         Args:
             transitions: List of transition event dictionaries
@@ -1056,67 +1413,142 @@ class Neo4jDatabase:
         # Normalize transition data
         transition_dicts = []
 
-        for transition in transitions:
-            data = (
-                transition.model_dump(by_alias=True)
-                if isinstance(transition, TransitionEvent)
-                else transition
-            )
+        # Track errors for logging
+        errors = []
+        processed_transitions = 0
 
-            # –– normalise the date once –––––––––––––––––––––––
-            td = data["transition_date"]
-            if isinstance(td, str):
-                td = td if "T" in td else f"{td}T00:00:00"
-            else:
-                td = td.isoformat()
+        for i, transition in enumerate(transitions):
+            try:
+                # Handle None transitions
+                if transition is None:
+                    errors.append(f"Transition at index {i} is None, skipping")
+                    continue
 
-            # –– build the dict that Neo4j will consume ––––––––
-            transition_dict = {
-                "profileUrn": data["profile_urn"],
-                "fromCompanyUrn": data["from_company_urn"],
-                "toCompanyUrn": data["to_company_urn"],
-                "transitionDate": td,
-                "transitionType": data["transition_type"],
-                "oldTitle": data["old_title"],
-                "newTitle": data["new_title"],
-                "locationChange": data.get("location_change", False),
-                "tenureDays": data.get("tenure_days", 0),
-            }
+                data = (
+                    transition.model_dump(by_alias=True)
+                    if isinstance(transition, TransitionEvent)
+                    else transition
+                )
 
-            # Only add if we have the minimum required data
-            if (
-                transition_dict["profileUrn"]
-                and transition_dict["fromCompanyUrn"]
-                and transition_dict["toCompanyUrn"]
-                and transition_dict["transitionDate"]
-            ):
-                transition_dicts.append(transition_dict)
+                # Handle None data
+                if data is None:
+                    errors.append(
+                        f"Transition data at index {i} is None after model_dump, skipping"
+                    )
+                    continue
+
+                # Check required fields
+                required_fields = [
+                    "profile_urn",
+                    "from_company_urn",
+                    "to_company_urn",
+                    "transition_date",
+                    "transition_type",
+                    "old_title",
+                    "new_title",
+                ]
+                missing_fields = [f for f in required_fields if f not in data]
+
+                if missing_fields:
+                    errors.append(
+                        f"Transition at index {i} missing required fields: {', '.join(missing_fields)}"
+                    )
+                    continue
+
+                # Safely normalize the date
+                try:
+                    td = data["transition_date"]
+                    if td is None:
+                        errors.append(
+                            f"Transition at index {i} has None transition_date, skipping"
+                        )
+                        continue
+
+                    if isinstance(td, str):
+                        td = td if "T" in td else f"{td}T00:00:00"
+                    else:
+                        td = td.isoformat()
+                except Exception as e:
+                    errors.append(
+                        f"Error processing transition_date for transition at index {i}: {str(e)}"
+                    )
+                    continue
+
+                # Build the dict that Neo4j will consume
+                transition_dict = {
+                    "profileUrn": data["profile_urn"],
+                    "fromCompanyUrn": data["from_company_urn"],
+                    "toCompanyUrn": data["to_company_urn"],
+                    "transitionDate": td,
+                    "transitionType": data["transition_type"],
+                    "oldTitle": data["old_title"] or "Unknown Title",
+                    "newTitle": data["new_title"] or "Unknown Title",
+                    "locationChange": data.get("location_change", False),
+                    "tenureDays": data.get("tenure_days", 0),
+                }
+
+                # Double-check the minimum required data
+                if (
+                    transition_dict["profileUrn"]
+                    and transition_dict["fromCompanyUrn"]
+                    and transition_dict["toCompanyUrn"]
+                    and transition_dict["transitionDate"]
+                ):
+                    transition_dicts.append(transition_dict)
+                    processed_transitions += 1
+                else:
+                    errors.append(
+                        f"Transition at index {i} failed validation checks, skipping"
+                    )
+
+            except Exception as e:
+                errors.append(f"Error processing transition at index {i}: {str(e)}")
 
         # Execute batch operation for transitions
         if transition_dicts:
-            transitions_query = """
-            UNWIND $transitions AS t
-            
-            MATCH (p:Profile {urn: t.profileUrn})
-            MATCH (oldCompany:Company {urn: t.fromCompanyUrn})
-            MATCH (newCompany:Company {urn: t.toCompanyUrn})
-            
-            CREATE (transition:Transition {
-                date: datetime(t.transitionDate),
-                type: t.transitionType,
-                oldTitle: t.oldTitle,
-                newTitle: t.newTitle,
-                locationChange: t.locationChange,
-                tenureDays: t.tenureDays
-            })
-            
-            CREATE (p)-[:HAS_TRANSITION]->(transition)
-            CREATE (transition)-[:FROM_COMPANY]->(oldCompany)
-            CREATE (transition)-[:TO_COMPANY]->(newCompany)
-            """
-            self._run_query(transitions_query, {"transitions": transition_dicts})
+            try:
+                transitions_query = """
+                UNWIND $transitions AS t
+                
+                MATCH (p:Profile {urn: t.profileUrn})
+                MATCH (oldCompany:Company {urn: t.fromCompanyUrn})
+                MATCH (newCompany:Company {urn: t.toCompanyUrn})
+                
+                CREATE (transition:Transition {
+                    date: datetime(t.transitionDate),
+                    type: t.transitionType,
+                    oldTitle: t.oldTitle,
+                    newTitle: t.newTitle,
+                    locationChange: t.locationChange,
+                    tenureDays: t.tenureDays
+                })
+                
+                CREATE (p)-[:HAS_TRANSITION]->(transition)
+                CREATE (transition)-[:FROM_COMPANY]->(oldCompany)
+                CREATE (transition)-[:TO_COMPANY]->(newCompany)
+                """
+                self._run_query(transitions_query, {"transitions": transition_dicts})
+            except Exception as e:
+                errors.append(f"Error creating transition nodes: {str(e)}")
 
-        print(f"Successfully stored {len(transition_dicts)} transition events")
+        # Print summary statistics
+        print(
+            f"Processed {processed_transitions}/{len(transitions)} transitions successfully."
+        )
+
+        if errors:
+            print(f"Encountered {len(errors)} errors during processing:")
+            for i, error in enumerate(errors[:10]):  # Show only first 10 errors
+                print(f"  {i+1}. {error}")
+            if len(errors) > 10:
+                print(f"  ... and {len(errors) - 10} more errors")
+
+        if processed_transitions == len(transitions):
+            print("All transitions processed successfully.")
+        else:
+            print(
+                f"WARNING: {len(transitions) - processed_transitions} transitions skipped due to errors!"
+            )
 
     def batch_store_chunked(self, func, data: List, batch_size=500):
         """Store profiles,companies,or transitions in smaller batches for better performance"""

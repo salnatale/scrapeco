@@ -140,8 +140,12 @@ def transitions_from_profile(profile: LinkedInProfile) -> List[TransitionEvent]:
             print("Skipping due to missing year/month.")
             tenure_days = 0
             if not nsd.get("year") or not nsd.get("month"):
-                t_date = datetime(nsd.get("year", datetime.now().year), nsd.get("month", 1), 1)
-                print(f"Transition date set to {t_date} due to missing date information.")
+                t_date = datetime(
+                    nsd.get("year", datetime.now().year), nsd.get("month", 1), 1
+                )
+                print(
+                    f"Transition date set to {t_date} due to missing date information."
+                )
         else:
             print(f"New start date: {nsd}, Old start date: {osd}.")
             t_date = datetime(nsd["year"], nsd["month"], 1)
@@ -190,7 +194,7 @@ def _generate_unique_company_urn(db: Neo4jDatabase) -> str:
             return urn
 
 
-def _ensure_company_in_db(db: Neo4jDatabase, comp: Company) -> None:
+def _ensure_urn_in_db(db: Neo4jDatabase, comp: Company) -> None:
     """
     Make sure there's a Company node for `comp`.
     Uses the minimal dict shape that `Neo4jDatabase.store_company` accepts.
@@ -204,6 +208,44 @@ def _ensure_company_in_db(db: Neo4jDatabase, comp: Company) -> None:
 
     # stub object → only `name` + `entity_urn` are required by store_company
     db.store_company({"entity_urn": comp.urn, "name": comp.name})
+
+
+def _check_company_exists_in_db(db: Neo4jDatabase, comp: Company) -> Optional[Company]:
+    """
+    Check if a company with the given name exists in the Neo4j database.
+
+    Args:
+        db: The Neo4jDatabase instance
+        comp: The Company object to check for
+
+    Returns:
+        Optional[Company]: The existing Company object if found, otherwise None
+    """
+    # Sanitize company name to avoid Cypher injection
+    company_name = comp.name.replace("'", "\\'")
+
+    # Query to find companies with the exact name
+    query = """
+    MATCH (c:Company)
+    WHERE c.name = $company_name
+    RETURN c.urn as urn, c.name as name
+    LIMIT 1
+    """
+
+    # Execute the query
+    result = db._run_query(query, {"company_name": comp.name})
+
+    # Check if a company was found
+    if result and len(result) > 0:
+        company_data = result[0]
+        print(
+            f"Found existing company in database: {company_data['name']} with URN: {company_data['urn']}"
+        )
+
+        # Update the original company object's URN
+        comp.urn = company_data["urn"]
+
+        return comp
 
 
 def check_companies(
@@ -232,27 +274,36 @@ def check_companies(
             print(
                 f"Processing experience entry {i + 1}/{len(profile.experience)}: {comp.name}"
             )
-
             # ----------------------------------------------------------
-            # 1.  Make sure we *have* a URN
+            # 1.  Check if the company exists by name in the DB
             # ----------------------------------------------------------
-            if not comp.urn:
-                print(
-                    f"Company '{comp.name}' is missing a URN. Generating a unique URN."
-                )
-                comp.urn = _generate_unique_company_urn(db)
-                print(f"Generated URN for company '{comp.name}': {comp.urn}")
+            exists = _check_company_exists_in_db(db, comp) # returns found company if found, and mutates original company's urn, so will merge.
+            if exists:
+                print(f"Company '{comp.name}' found in DB with URN: {comp.urn}")
+                ## If the company exists, we can use the existing URN and skip the rest of the checks.
             else:
-                print(f"Company '{comp.name}' already has a URN: {comp.urn}")
+                print(f"Company '{comp.name}' not found in DB by name.")
+                    
+                # ----------------------------------------------------------
+                # 2.  Make sure we *have* a URN
+                # ----------------------------------------------------------
+                
+                if not comp.urn:
+                    print(
+                        f"Company '{comp.name}' is missing a URN, and not in DB by name, generating a new one."
+                    )
+                    
+                    comp.urn = _generate_unique_company_urn(db)
+                    print(f"Generated URN for company '{comp.name}': {comp.urn}")
 
-            # ----------------------------------------------------------
-            # 2.  Make sure Neo4j knows that company
-            # ----------------------------------------------------------
-            print(
-                f"Ensuring company '{comp.name}' with URN '{comp.urn}' exists in Neo4j."
-            )
-            _ensure_company_in_db(db, comp)
-            print(f"Company '{comp.name}' is now ensured in Neo4j.")
+                # ----------------------------------------------------------
+                # 3.  Add company urn to neo4j, assuming it doesn't exist
+                # ----------------------------------------------------------
+                print(
+                    f"Ensuring company '{comp.name}' with URN '{comp.urn}' exists in Neo4j."
+                )
+                _ensure_urn_in_db(db, comp)
+                print(f"Company '{comp.name}' is now ensured in Neo4j.")
 
         print("Finished processing all experience entries.")
         print(f"Returning profile with expriences: {profile.experience}")

@@ -39,7 +39,7 @@ class Experience(BaseModel):
     company: Company
     description: Optional[str] = None
     location: Optional[Location] = None
-    time_period: Optional[TimePeriod] = Field(..., alias="timePeriod")
+    time_period: TimePeriod = Field(..., alias="timePeriod")
     entity_urn: Optional[str] = Field(None, alias="entityUrn")
 
     class Config:
