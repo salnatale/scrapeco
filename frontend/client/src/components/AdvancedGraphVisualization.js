@@ -42,14 +42,37 @@ const AdvancedGraphVisualization = ({ data }) => {
   
   useEffect(() => {
     if (!data || !data.nodes || !data.links || data.nodes.length === 0) {
+      console.warn("No visualization data available:", data);
       return;
     }
+    
+    console.log("Advanced visualization data:", data);
+    
+    // Make deep copies to avoid modifying the original data
+    const nodes = JSON.parse(JSON.stringify(data.nodes));
+    const nodeIds = new Set(nodes.map(n => n.id));
+    
+    // Fix any invalid links by ensuring source and target are properly formatted
+    const validLinks = JSON.parse(JSON.stringify(data.links))
+      .map(link => ({
+        ...link,
+        // Make sure source and target are strings or objects with id
+        source: typeof link.source === 'object' ? link.source.id : link.source,
+        target: typeof link.target === 'object' ? link.target.id : link.target
+      }))
+      .filter(link => {
+        const isValid = nodeIds.has(link.source) && nodeIds.has(link.target);
+        if (!isValid) {
+          console.warn("Skipping invalid link:", link, "Source or target node not found");
+        }
+        return isValid;
+      });
     
     // Clear any existing SVG content
     d3.select(svgRef.current).selectAll('*').remove();
     
-    const width = svgRef.current.clientWidth;
-    const height = svgRef.current.clientHeight;
+    const width = svgRef.current.clientWidth || 800;
+    const height = svgRef.current.clientHeight || 600;
     
     // Create SVG element with dark theme background
     const svg = d3.select(svgRef.current)
@@ -109,12 +132,13 @@ const AdvancedGraphVisualization = ({ data }) => {
       .style('font-size', '12px');
       
     // Create a simulation for positioning nodes
-    const simulation = d3.forceSimulation(data.nodes)
-      .force('link', d3.forceLink(data.links).id(d => d.id).distance(linkStrength))
-      .force('charge', d3.forceManyBody().strength(-400))
+    const simulation = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(validLinks).id(d => d.id).distance(linkStrength))
+      .force('charge', d3.forceManyBody().strength(-600))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('x', d3.forceX(width / 2).strength(0.1))
-      .force('y', d3.forceY(height / 2).strength(0.1));
+      .force('y', d3.forceY(height / 2).strength(0.1))
+      .alphaDecay(0.02);  // Slower cooling for better layout
       
     // Store the simulation reference
     simulationRef.current = simulation;
@@ -123,7 +147,7 @@ const AdvancedGraphVisualization = ({ data }) => {
     const link = g.append('g')
       .attr('class', 'links')
       .selectAll('g')
-      .data(data.links)
+      .data(validLinks)
       .enter().append('g');
       
     // Link lines
@@ -166,7 +190,7 @@ const AdvancedGraphVisualization = ({ data }) => {
     const node = g.append('g')
       .attr('class', 'nodes')
       .selectAll('g')
-      .data(data.nodes)
+      .data(nodes)
       .enter().append('g')
       .call(d3.drag()
         .on('start', dragstarted)
@@ -196,6 +220,7 @@ const AdvancedGraphVisualization = ({ data }) => {
       .text(d => {
         let tooltip = `ID: ${d.id}\nType: ${d.type || 'Unknown'}`;
         if (d.name) tooltip += `\nName: ${d.name}`;
+        if (d.label) tooltip += `\nLabel: ${d.label}`;
         if (d.description) tooltip += `\nDescription: ${d.description}`;
         return tooltip;
       });
@@ -223,7 +248,9 @@ const AdvancedGraphVisualization = ({ data }) => {
         .attr('r', (d.size || 12) * 1.2);
         
       // Find connected links
-      const connectedLinks = data.links.filter(l => l.source.id === d.id || l.target.id === d.id);
+      const connectedLinks = validLinks.filter(l => {
+        return l.source === d.id || l.target === d.id;
+      });
       
       link.filter(l => connectedLinks.includes(l))
         .selectAll('line')
@@ -232,9 +259,9 @@ const AdvancedGraphVisualization = ({ data }) => {
         .attr('stroke-width', 2);
         
       // Highlight connected nodes
-      const connectedNodeIds = connectedLinks.map(l => 
-        l.source.id === d.id ? l.target.id : l.source.id
-      );
+      const connectedNodeIds = connectedLinks.map(l => {
+        return l.source === d.id ? l.target : l.source;
+      });
       
       node.filter(n => connectedNodeIds.includes(n.id))
         .select('circle')
@@ -250,17 +277,6 @@ const AdvancedGraphVisualization = ({ data }) => {
         d3.zoomIdentity,
         d3.zoomTransform(svg.node()).invert([width / 2, height / 2])
       );
-      
-      // Reset highlighting
-      node.select('circle')
-        .attr('stroke', '#444')
-        .attr('stroke-width', 1.5)
-        .attr('r', n => n.size || 12);
-        
-      link.selectAll('line')
-        .attr('stroke', '#777')
-        .attr('stroke-opacity', 0.6)
-        .attr('stroke-width', l => Math.sqrt(l.value) || 1.5);
     });
     
     // Position updates on each simulation tick
@@ -278,6 +294,9 @@ const AdvancedGraphVisualization = ({ data }) => {
       node.attr('transform', d => `translate(${d.x},${d.y})`);
     });
     
+    // Run simulation for 300 ticks to get better initial positions
+    for (let i = 0; i < 300; ++i) simulation.tick();
+    
     // Drag functions
     function dragstarted(event, d) {
       if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -292,152 +311,52 @@ const AdvancedGraphVisualization = ({ data }) => {
     
     function dragended(event, d) {
       if (!event.active) simulation.alphaTarget(0);
-      // Keep nodes fixed after dragging
+      // Keep nodes in place after dragging
       d.fx = event.x;
       d.fy = event.y;
     }
     
-    // Update simulation if linkStrength changes
-    if (simulation && data.links.length > 0) {
-      simulation.force('link').distance(linkStrength);
-      simulation.alpha(0.3).restart();
-    }
-    
     // Cleanup function
     return () => {
-      if (simulation) simulation.stop();
+      simulation.stop();
     };
-  }, [data, showLabels, linkStrength]);
+  }, [data, linkStrength, showLabels]);
   
-  // Function to handle zoom in/out buttons
   const handleZoom = (direction) => {
     const svg = d3.select(svgRef.current);
     const currentTransform = d3.zoomTransform(svg.node());
-    const newScale = direction === 'in' ? currentTransform.k * 1.3 : currentTransform.k / 1.3;
     
-    svg.transition().duration(250).call(
+    const scaleFactor = direction === 'in' ? 1.3 : 0.7;
+    const newK = currentTransform.k * scaleFactor;
+    
+    svg.transition().duration(300).call(
       d3.zoom().transform,
-      d3.zoomIdentity.translate(currentTransform.x, currentTransform.y).scale(newScale)
+      d3.zoomIdentity.scale(newK).translate(currentTransform.x, currentTransform.y)
     );
     
-    setZoomLevel(newScale);
+    setZoomLevel(newK);
   };
   
-  // Function to handle link strength changes
   const handleLinkStrengthChange = (event, newValue) => {
     setLinkStrength(newValue);
+    // Simulation will be restarted in useEffect
   };
   
-  // Function to toggle labels visibility
   const handleLabelsToggle = () => {
     setShowLabels(!showLabels);
   };
-  
+
   return (
-    <Box sx={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* Controls panel */}
-      <Paper 
-        elevation={3} 
-        sx={{ 
-          position: 'absolute', 
-          top: 10, 
-          right: 10, 
-          p: 2, 
-          zIndex: 1000, 
-          width: 250,
-          backgroundColor: 'background.card',
-          color: 'text.primary',
-          borderRadius: 2,
-          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)'
-        }}
-      >
-        <Typography variant="subtitle1" gutterBottom>
-          Graph Controls
-        </Typography>
-        
-        <Grid container spacing={1} alignItems="center" sx={{ mb: 2 }}>
-          <Grid item>
-            <Typography variant="body2">Zoom</Typography>
-          </Grid>
-          <Grid item>
-            <IconButton size="small" onClick={() => handleZoom('out')} sx={{ color: 'primary.main' }}>
-              <ZoomOut />
-            </IconButton>
-          </Grid>
-          <Grid item xs>
-            <Slider
-              value={zoomLevel}
-              min={0.1}
-              max={4}
-              step={0.1}
-              onChange={(e, val) => setZoomLevel(val)}
-              sx={{ color: 'primary.main' }}
-            />
-          </Grid>
-          <Grid item>
-            <IconButton size="small" onClick={() => handleZoom('in')} sx={{ color: 'primary.main' }}>
-              <ZoomIn />
-            </IconButton>
-          </Grid>
-        </Grid>
-        
-        <Typography variant="body2" sx={{ mb: 1 }}>
-          Link Strength
-        </Typography>
-        <Slider
-          value={linkStrength}
-          min={10}
-          max={300}
-          onChange={handleLinkStrengthChange}
-          sx={{ color: 'primary.main', mb: 2 }}
-        />
-        
-        <Grid container spacing={2}>
-          <Grid item xs={6}>
-            <FormControlLabel
-              control={
-                <Switch 
-                  checked={showLabels} 
-                  onChange={handleLabelsToggle}
-                  color="primary"
-                />
-              }
-              label={
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  {showLabels ? <Visibility fontSize="small" /> : <VisibilityOff fontSize="small" />}
-                  <Typography variant="body2" sx={{ ml: 0.5 }}>
-                    Labels
-                  </Typography>
-                </Box>
-              }
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <Button
-              startIcon={<Refresh />}
-              variant="outlined"
-              size="small"
-              onClick={resetGraph}
-              sx={{ 
-                borderColor: 'primary.main',
-                color: 'primary.main'
-              }}
-            >
-              Reset
-            </Button>
-          </Grid>
-        </Grid>
-      </Paper>
-      
-      {/* Graph visualization */}
+    <Box sx={{ position: 'relative' }}>
       <Box 
         sx={{ 
           width: '100%', 
-          height: '700px', 
+          height: '600px', 
           bgcolor: 'background.paper', 
           borderRadius: 2,
           overflow: 'hidden',
-          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)'
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+          position: 'relative',
         }}
       >
         <svg 
@@ -445,6 +364,94 @@ const AdvancedGraphVisualization = ({ data }) => {
           style={{ width: '100%', height: '100%' }}
         />
       </Box>
+      
+      <Paper sx={{ 
+        position: 'absolute', 
+        top: 16, 
+        right: 16, 
+        p: 2, 
+        bgcolor: 'rgba(18, 24, 40, 0.8)',
+        backdropFilter: 'blur(8px)',
+        borderRadius: 2,
+        width: 240
+      }}>
+        <Typography variant="subtitle2" color="white" gutterBottom>
+          Graph Controls
+        </Typography>
+        
+        <Typography variant="caption" color="white" gutterBottom>
+          Zoom
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <IconButton 
+            size="small" 
+            onClick={() => handleZoom('out')} 
+            sx={{ color: 'primary.main' }}
+          >
+            <ZoomOut />
+          </IconButton>
+          
+          <Slider
+            size="small"
+            value={zoomLevel}
+            min={0.1}
+            max={4}
+            step={0.1}
+            valueLabelDisplay="auto"
+            sx={{ mx: 1, color: 'primary.main' }}
+          />
+          
+          <IconButton 
+            size="small" 
+            onClick={() => handleZoom('in')} 
+            sx={{ color: 'primary.main' }}
+          >
+            <ZoomIn />
+          </IconButton>
+        </Box>
+        
+        <Typography variant="caption" color="white" gutterBottom>
+          Link Strength
+        </Typography>
+        <Slider
+          size="small"
+          value={linkStrength}
+          min={20}
+          max={200}
+          step={10}
+          onChange={handleLinkStrengthChange}
+          valueLabelDisplay="auto"
+          sx={{ mb: 2, color: 'primary.main' }}
+        />
+        
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <FormControlLabel
+            control={
+              <Switch 
+                checked={showLabels}
+                onChange={handleLabelsToggle}
+                size="small"
+                sx={{ '& .MuiSwitch-switchBase.Mui-checked': { color: 'primary.main' } }}
+              />
+            }
+            label={<Typography variant="caption" color="white">Labels</Typography>}
+          />
+          
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<Refresh />}
+            onClick={resetGraph}
+            sx={{ 
+              color: 'white', 
+              borderColor: 'primary.main',
+              '&:hover': { borderColor: 'primary.light' }
+            }}
+          >
+            Reset
+          </Button>
+        </Box>
+      </Paper>
     </Box>
   );
 };

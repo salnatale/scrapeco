@@ -1,17 +1,10 @@
 import React, { useState } from 'react';
-import { Container, Typography, Tabs, Tab, Box } from '@mui/material';
+import { Container, Typography, Box, Paper } from '@mui/material';
 import FileUploadForm from '../components/FileUploadForm';
 
 const UploadPage = () => {
-  const [tabValue, setTabValue] = useState(0);
-
-  const handleTabChange = (_, newValue) => {
-    setTabValue(newValue);
-  };
-
-
-  const resumeUploadEndpoint = 'http://localhost:5001/api/upload/resume';
-  const linkedinUploadEndpoint = 'http://localhost:5001/api/upload/linkedin';
+  // Single endpoint for all uploads
+  const uploadEndpoint = 'http://localhost:5001/api/upload/resume';
   
   return (
     <Box
@@ -19,44 +12,35 @@ const UploadPage = () => {
         minHeight: '100vh',
         backgroundColor: 'background.default',
         color: 'text.primary',
-        pt: 4
+        pt: 4,
+        pb: 8
       }}
     >
-      <Container>
-        <Tabs
-          value={tabValue}
-          onChange={handleTabChange}
-          centered
-          textColor="inherit"
-          TabIndicatorProps={{ style: { backgroundColor: '#09D3AC' } }}
+      <Container maxWidth="md">
+        <Typography variant="h4" align="center" sx={{ fontWeight: 'bold', mb: 4, color: 'primary.main' }}>
+          Upload Your Professional Profile
+        </Typography>
+        
+        <Paper 
+          elevation={3} 
+          sx={{ 
+            p: 4, 
+            borderRadius: 2,
+            backgroundColor: 'background.paper',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)'
+          }}
         >
-          <Tab label="Resume Upload" />
-          <Tab label="LinkedIn Screenshot Upload" />
-        </Tabs>
-        <Box sx={{ mt: 4 }}>
-          {tabValue === 0 && (
-            <>
-              <Typography variant="h5" sx={{ fontWeight: 'bold', mb: 2 }}>
-                Resume Upload
-              </Typography>
-              <Typography variant="body1" sx={{ mb: 2 }}>
-                Upload a picture of your resume.
-              </Typography>
-              <FileUploadForm endpoint={resumeUploadEndpoint} />
-            </>
-          )}
-          {tabValue === 1 && (
-            <>
-              <Typography variant="h5" sx={{ fontWeight: 'bold', mb: 2 }}>
-                LinkedIn Screenshot Upload
-              </Typography>
-              <Typography variant="body1" sx={{ mb: 2 }}>
-                Upload a screenshot of your LinkedIn homepage.
-              </Typography>
-              <FileUploadForm endpoint={linkedinUploadEndpoint} />
-            </>
-          )}
-        </Box>
+          <Typography variant="h5" sx={{ fontWeight: 'bold', mb: 2 }}>
+            Resume & LinkedIn Upload
+          </Typography>
+          
+          <Typography variant="body1" sx={{ mb: 3 }}>
+            Upload your resume or LinkedIn data to visualize your career path and professional network. 
+            We support PDF, DOCX, images, and other common file formats.
+          </Typography>
+          
+          <FileUploadForm endpoint={uploadEndpoint} />
+        </Paper>
       </Container>
     </Box>
   );

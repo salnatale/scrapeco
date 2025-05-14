@@ -24,13 +24,22 @@ urllib3==2.3.0
 uvicorn==0.34.0
 scipy
 numpy
+scikit-learn>=1.6.0
 pydruid[pandas,sqlalchemy]>=0.6.9
 pandas>=1.3.0
 sqlalchemy>=1.4.0
 openai==1.64.0
+pdfplumber>=0.11.0
+pytesseract>=0.3.0
+pdf2image>=1.16.0
 
 # Additional requirements for FastAPI
 python-multipart>=0.0.9
+
+networkx>=3.0
+python-louvain>=0.16
+plotly>=5.0
+dash>=2.0
 
 # annotated-types==0.7.0
 # antlr-denter==1.3.1

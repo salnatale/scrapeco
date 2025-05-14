@@ -35,19 +35,11 @@ const ResultsPage = () => {
     // Get profile data from location state
     if (location.state && location.state.profileData) {
       const data = location.state.profileData;
+      console.log("Received profile data:", data);
       
-      // Check if the parsed data is sufficient for visualization
-      const hasMinimumData = checkSufficientData(data);
-      
-      if (hasMinimumData) {
-        setProfileData(data);
-        transformDataToGraph(data);
-      } else {
-        // If insufficient data, enhance with sample data
-        const enhancedData = enhanceWithSampleData(data);
-        setProfileData(enhancedData);
-        transformDataToGraph(enhancedData);
-      }
+      // Use the actual data directly - don't enhance with fake data
+      setProfileData(data);
+      transformDataToGraph(data);
     }
   }, [location.state]);
   
@@ -61,7 +53,7 @@ const ResultsPage = () => {
     return hasName && (hasExperience || hasSkills);
   };
   
-  // Enhance minimal data with sample data
+  // Keep the enhanceWithSampleData function but don't use it in the main flow
   const enhanceWithSampleData = (data) => {
     // Start with the original data or an empty object
     const enhancedData = { ...data } || {};
@@ -122,41 +114,96 @@ const ResultsPage = () => {
     if (!data) return;
 
     try {
+      console.log("Transforming data to graph:", data);
+      
       // Initialize arrays for graph nodes and links
       const nodes = [];
       const links = [];
       
+      // Get the actual profile data from the API response
+      const profile = data.profile || data.fastApiResponse?.profile || data;
+      console.log("Using profile data:", profile);
+      
       // Create basic graph data (person and company connections)
       
       // Add person node
-      const personId = `person-${data.id || '1'}`;
+      const personId = `person-${profile.profile_id || profile.member_urn || profile.urn_id || '1'}`;
       nodes.push({
         id: personId,
-        label: data.name || 'Profile',
+        label: profile.first_name && profile.last_name 
+          ? `${profile.first_name} ${profile.last_name}` 
+          : (profile.name || 'Your Profile'),
         type: 'person',
         size: 20,
-        description: data.headline || 'Professional'
+        description: profile.headline || profile.summary || 'Professional'
       });
       
       // Add company nodes and links for work experiences
-      if (data.experiences && Array.isArray(data.experiences)) {
-        // Sort experiences by date if available
-        const sortedExperiences = [...data.experiences].sort((a, b) => {
-          if (a.startDate && b.startDate) {
-            return new Date(b.startDate) - new Date(a.startDate);
+      const experiences = profile.experience || profile.experiences || [];
+      if (experiences && Array.isArray(experiences)) {
+        console.log("Processing experiences:", experiences);
+        
+        // Process each experience to extract company data
+        const processedExperiences = experiences.map(exp => {
+          // Handle different company data structures
+          let companyName, companyUrn, companyId;
+          
+          if (exp.company) {
+            if (typeof exp.company === 'string') {
+              companyName = exp.company;
+              companyUrn = `company-${companyName.replace(/\s+/g, '')}`;
+              companyId = companyUrn.replace(/[^a-zA-Z0-9]/g, '');
+            } else {
+              companyName = exp.company.name || 'Unknown Company';
+              companyUrn = exp.company.urn || `company-${companyName.replace(/\s+/g, '')}`;
+              companyId = companyUrn.replace(/[^a-zA-Z0-9]/g, '');
+            }
+          } else {
+            companyName = 'Unknown Company';
+            companyUrn = `company-unknown`;
+            companyId = 'companyunknown';
           }
-          return 0;
+          
+          return {
+            ...exp,
+            processedCompany: {
+              name: companyName,
+              urn: companyUrn,
+              id: `node-${companyId}`
+            }
+          };
         });
+        
+        // Sort experiences by date if available
+        const sortedExperiences = [...processedExperiences].sort((a, b) => {
+          // Handle different date formats
+          const getDate = (exp) => {
+            if (exp.time_period && exp.time_period.start_date) {
+              return new Date(
+                exp.time_period.start_date.year, 
+                (exp.time_period.start_date.month || 1) - 1
+              );
+            } else if (exp.startDate) {
+              return new Date(exp.startDate);
+            }
+            return new Date(0);
+          };
+          
+          return getDate(b) - getDate(a);
+        });
+        
+        console.log("Sorted experiences:", sortedExperiences);
         
         // Add all company nodes
         sortedExperiences.forEach((exp, index) => {
-          const companyId = `company-${exp.company.replace(/\s+/g, '') || index}`;
+          const companyId = exp.processedCompany.id;
+          const companyName = exp.processedCompany.name;
           
           // Add company node if it doesn't exist
           if (!nodes.some(node => node.id === companyId)) {
             nodes.push({
               id: companyId,
-              label: exp.company || `Company ${index + 1}`,
+              label: companyName,
               type: 'company',
               size: 15,
               description: exp.description || ''
@@ -174,8 +221,8 @@ const ResultsPage = () => {
         
         // Add career progression links between companies
         for (let i = 0; i < sortedExperiences.length - 1; i++) {
-          const currentCompanyId = `company-${sortedExperiences[i].company.replace(/\s+/g, '') || i}`;
-          const nextCompanyId = `company-${sortedExperiences[i+1].company.replace(/\s+/g, '') || i+1}`;
+          const currentCompanyId = sortedExperiences[i].processedCompany.id;
+          const nextCompanyId = sortedExperiences[i+1].processedCompany.id;
           
           links.push({
             source: nextCompanyId,
@@ -186,6 +233,9 @@ const ResultsPage = () => {
         }
       }
       
+      console.log("Generated nodes:", nodes);
+      console.log("Generated links:", links);
+      
       // Set basic graph data
       setGraphData({ nodes, links });
       
@@ -194,37 +244,20 @@ const ResultsPage = () => {
       const enhancedLinks = [...links];
       
       // Add skill nodes and links
-      if (data.skills && Array.isArray(data.skills)) {
-        // Group skills by domain to create relationships between similar skills
-        const skillDomains = {
-          'engineering': ['Engineering Leadership', 'System Architecture', 'DevOps', 'Microservices'],
-          'programming': ['Python', 'JavaScript', 'Java'],
-          'ai': ['Artificial Intelligence', 'Machine Learning', 'Data Science'],
-          'cloud': ['Cloud Infrastructure', 'AWS', 'Kubernetes'],
-          'management': ['Agile Methodologies', 'Team Building', 'Product Development']
-        };
-        
-        // Create a reverse lookup for skill domains
-        const skillToDomain = {};
-        Object.entries(skillDomains).forEach(([domain, skills]) => {
-          skills.forEach(skill => {
-            skillToDomain[skill] = domain;
-          });
-        });
-        
-        // Add skill nodes grouped by domain
-        const skillIdMap = {};
-        data.skills.forEach((skill, index) => {
-          const skillId = `skill-${skill.name.replace(/\s+/g, '') || index}`;
-          skillIdMap[skill.name] = skillId;
+      const skills = profile.skills || [];
+      if (skills && Array.isArray(skills)) {
+        // Add skill nodes
+        skills.forEach((skill, index) => {
+          // Handle different skill formats
+          const skillName = typeof skill === 'string' ? skill : (skill.name || `Skill ${index + 1}`);
+          const skillId = `skill-${skillName.replace(/\s+/g, '').replace(/[^a-zA-Z0-9]/g, '')}-${index}`;
           
           // Add skill node
           enhancedNodes.push({
             id: skillId,
-            label: skill.name || `Skill ${index + 1}`,
+            label: skillName,
             type: 'skill',
-            size: 8 + (skill.endorsements ? Math.min(skill.endorsements / 10, 4) : 0),
-            description: `Endorsements: ${skill.endorsements || 0}`
+            size: 10
           });
           
           // Add link from person to skill
@@ -232,202 +265,53 @@ const ResultsPage = () => {
             source: personId,
             target: skillId,
             value: 1,
-            label: 'Has skill'
+            label: 'Has Skill'
           });
-          
-          // Connect to companies where this skill was likely used
-          data.experiences.forEach((exp, expIndex) => {
-            // More relevant skills have higher chance of linking to companies
-            const relevanceThreshold = 0.5 - (skill.endorsements ? skill.endorsements / 100 : 0);
-            if (Math.random() > relevanceThreshold) {
-              const companyId = `company-${exp.company.replace(/\s+/g, '') || expIndex}`;
-              enhancedLinks.push({
-                source: companyId,
-                target: skillId,
-                value: 0.7,
-                label: 'Utilized'
-              });
-            }
-          });
-        });
-        
-        // Add links between related skills (within same domain)
-        Object.values(skillDomains).forEach(domainSkills => {
-          for (let i = 0; i < domainSkills.length; i++) {
-            if (!skillIdMap[domainSkills[i]]) continue;
-            
-            for (let j = i + 1; j < domainSkills.length; j++) {
-              if (!skillIdMap[domainSkills[j]]) continue;
-              
-              enhancedLinks.push({
-                source: skillIdMap[domainSkills[i]],
-                target: skillIdMap[domainSkills[j]],
-                value: 0.5,
-                label: 'Related'
-              });
-            }
-          }
         });
       }
       
       // Add education nodes and links
-      if (data.education && Array.isArray(data.education)) {
-        data.education.forEach((edu, index) => {
-          const eduId = `education-${edu.school.replace(/\s+/g, '') || index}`;
+      const education = profile.education || [];
+      if (education && Array.isArray(education)) {
+        education.forEach((edu, index) => {
+          // Handle different education formats
+          let schoolName;
+          if (typeof edu.school === 'string') {
+            schoolName = edu.school;
+          } else if (edu.school && edu.school.name) {
+            schoolName = edu.school.name;
+          } else {
+            schoolName = edu.name || `Education ${index + 1}`;
+          }
+          
+          const schoolId = `school-${schoolName.replace(/\s+/g, '').replace(/[^a-zA-Z0-9]/g, '')}-${index}`;
           
           // Add education node
           enhancedNodes.push({
-            id: eduId,
-            label: edu.school || `School ${index + 1}`,
+            id: schoolId,
+            label: schoolName,
             type: 'education',
             size: 12,
-            description: edu.description || `${edu.degree || ''} ${edu.fieldOfStudy || ''}`
+            description: edu.degree_name || edu.field_of_study || edu.fieldOfStudy || ''
           });
           
           // Add link from person to education
           enhancedLinks.push({
             source: personId,
-            target: eduId,
+            target: schoolId,
             value: 1.5,
-            label: edu.degree || 'Studied at'
-          });
-          
-          // Connect education to relevant skills
-          const fieldToSkills = {
-            'Computer Science': ['Python', 'Java', 'JavaScript', 'System Architecture', 'Artificial Intelligence', 'Machine Learning'],
-            'Technology Management': ['Engineering Leadership', 'Team Building', 'Agile Methodologies', 'Product Development'],
-            'Business Administration': ['Team Building', 'Product Development'],
-            'Mathematics': ['Data Science', 'Machine Learning']
-          };
-          
-          const relevantSkills = fieldToSkills[edu.fieldOfStudy] || [];
-          relevantSkills.forEach(skillName => {
-            const skillNodes = enhancedNodes.filter(node => 
-              node.type === 'skill' && node.label === skillName
-            );
-            
-            if (skillNodes.length > 0) {
-              enhancedLinks.push({
-                source: eduId,
-                target: skillNodes[0].id,
-                value: 0.7,
-                label: 'Taught'
-              });
-            }
+            label: edu.degree_name || edu.degree || 'Studied at'
           });
         });
       }
       
-      // Add certification nodes
-      if (data.certifications && Array.isArray(data.certifications)) {
-        data.certifications.forEach((cert, index) => {
-          const certId = `cert-${cert.name.replace(/\s+/g, '') || index}`;
-          
-          // Add certification node
-          enhancedNodes.push({
-            id: certId,
-            label: cert.name || `Certification ${index + 1}`,
-            type: 'education',
-            size: 10,
-            description: `Issued by: ${cert.issuer || 'Unknown'}, Date: ${cert.date || 'Unknown'}`
-          });
-          
-          // Link certification to person
-          enhancedLinks.push({
-            source: personId,
-            target: certId,
-            value: 1,
-            label: 'Certified'
-          });
-          
-          // Link certification to relevant skills
-          const certToSkills = {
-            'AWS Solutions Architect Professional': ['AWS', 'Cloud Infrastructure', 'System Architecture'],
-            'Google Cloud Professional Data Engineer': ['Cloud Infrastructure', 'Data Science'],
-            'Certified Kubernetes Administrator': ['Kubernetes', 'DevOps', 'Cloud Infrastructure']
-          };
-          
-          const relevantSkills = certToSkills[cert.name] || [];
-          relevantSkills.forEach(skillName => {
-            const skillNodes = enhancedNodes.filter(node => 
-              node.type === 'skill' && node.label === skillName
-            );
-            
-            if (skillNodes.length > 0) {
-              enhancedLinks.push({
-                source: certId,
-                target: skillNodes[0].id,
-                value: 0.8,
-                label: 'Validates'
-              });
-            }
-          });
-        });
-      }
-      
-      // Add project nodes
-      if (data.projects && Array.isArray(data.projects)) {
-        data.projects.forEach((project, index) => {
-          const projectId = `project-${project.name.replace(/\s+/g, '') || index}`;
-          
-          // Add project node
-          enhancedNodes.push({
-            id: projectId,
-            label: project.name || `Project ${index + 1}`,
-            type: 'company', // Reuse company type for styling
-            size: 11,
-            description: project.description || ''
-          });
-          
-          // Link project to person
-          enhancedLinks.push({
-            source: personId,
-            target: projectId,
-            value: 1.2,
-            label: 'Developed'
-          });
-          
-          // Link project to relevant skills
-          if (project.technologies && Array.isArray(project.technologies)) {
-            project.technologies.forEach(tech => {
-              const skillNodes = enhancedNodes.filter(node => 
-                node.type === 'skill' && node.label === tech
-              );
-              
-              if (skillNodes.length > 0) {
-                enhancedLinks.push({
-                  source: projectId,
-                  target: skillNodes[0].id,
-                  value: 0.9,
-                  label: 'Used'
-                });
-              }
-            });
-          }
-          
-          // Link project to most recent company (likely where project was done)
-          if (data.experiences && data.experiences.length > 0) {
-            const latestCompany = data.experiences[0];
-            const companyId = `company-${latestCompany.company.replace(/\s+/g, '') || 0}`;
-            
-            enhancedLinks.push({
-              source: companyId,
-              target: projectId,
-              value: 1,
-              label: 'Delivered at'
-            });
-          }
-        });
-      }
+      console.log("Enhanced nodes:", enhancedNodes);
+      console.log("Enhanced links:", enhancedLinks);
       
       // Set enhanced graph data
-      setEnhancedGraphData({
-        nodes: enhancedNodes,
-        links: enhancedLinks
-      });
-      
+      setEnhancedGraphData({ nodes: enhancedNodes, links: enhancedLinks });
     } catch (error) {
-      console.error('Error transforming data to graph format:', error);
+      console.error("Error transforming data to graph:", error);
     }
   };
 
