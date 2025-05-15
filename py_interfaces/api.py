@@ -5,6 +5,8 @@ from typing import List, Optional, Dict, Any, Union, Literal
 import os
 import json
 import uvicorn
+from enrich_company import PitchbookEnricher          
+from fastapi import BackgroundTasks                 
 from uuid import uuid4
 from datetime import datetime
 from parser import (
@@ -95,7 +97,12 @@ class TrainRequest(BaseModel):
     hyperparams: Dict = Field(
         default_factory=dict, description="Optional training hyperparameters"
     )
-
+class EnrichPitchbookRequest(BaseModel):
+    root_dir: str = Field(..., description="Absolute or relative path to the PitchBook data root")
+    async_mode: bool = Field(
+        True,
+        description="Run enrichment in a background task (immediate 202 response)",
+    )
 
 class TrainResponse(BaseModel):
     job_id: str = Field(..., description="ID of the launched training job")
@@ -162,16 +169,21 @@ async def root():
 @app.post("/api/process_corpus")
 async def process_corpus(folder_path: str):
     """
-    Process a local folder of .txt files and batch store parsed LinkedIn profiles and transitions.
-    Each file is expected to be plain text.
+    Process a local folder of .txt and image files and batch store parsed LinkedIn profiles and transitions.
+    Each file is expected to be plain text or an image.
     """
     if not os.path.exists(folder_path):
         raise HTTPException(status_code=404, detail="Folder path not found")
 
-    file_paths = glob.glob(os.path.join(folder_path, "*.txt"))
+    # Collect .txt and image files
+    file_paths = glob.glob(os.path.join(folder_path, "*.txt")) + glob.glob(
+        os.path.join(folder_path, "*.png")
+    ) + glob.glob(os.path.join(folder_path, "*.jpg")) + glob.glob(
+        os.path.join(folder_path, "*.jpeg")
+    )
     if not file_paths:
         raise HTTPException(
-            status_code=404, detail="No .txt files found in the directory"
+            status_code=404, detail="No .txt or image files found in the directory"
         )
     file_paths = file_paths[:1000]  # Limit to first 1000 files for performance
     processed_profiles = []
@@ -229,6 +241,29 @@ async def process_corpus(folder_path: str):
             "failed": len(failed),
         }
     }
+
+@app.post("/api/enrich/pitchbook", status_code=202)
+async def enrich_pitchbook(req: EnrichPitchbookRequest, background_tasks: BackgroundTasks):
+    """
+    Walk *root_dir*/<Company> folders, parse the PitchBook Excel exports,
+    and augment existing :Company nodes with the engineered features.
+    """
+    # Small inner function so BackgroundTasks can call it synchronously
+    def _run():
+        enricher = PitchbookEnricher(
+            root_dir=req.root_dir,
+            neo4j_uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+            neo4j_user=os.getenv("NEO4J_USER", "neo4j"),
+            neo4j_password=os.getenv("NEO4J_PASSWORD", "neo4j"),
+        )
+        enricher.run()
+
+    if req.async_mode:
+        background_tasks.add_task(_run)
+        return {"status": "queued", "root_dir": req.root_dir}
+    else:
+        _run()
+        return {"status": "completed", "root_dir": req.root_dir}
 
 
 # ─── Database Endpoints ────────────────────────────────────────────────────────
