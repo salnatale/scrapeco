@@ -3,7 +3,6 @@ import {
   Box, 
   Button, 
   Typography, 
-  Paper, 
   LinearProgress, 
   Alert, 
   AlertTitle,
@@ -12,7 +11,7 @@ import {
   Fade
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { CloudUpload, CheckCircle, Error } from '@mui/icons-material';
+import { CloudUpload, FileUpload } from '@mui/icons-material';
 
 const FileUploadForm = ({ endpoint }) => {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -108,7 +107,7 @@ const FileUploadForm = ({ endpoint }) => {
     switch (uploadStatus) {
       case 'uploading':
         return (
-          <Box sx={{ width: '100%', mt: 2 }}>
+          <Box sx={{ width: '100%', mt: 3 }}>
             <Typography variant="body2" sx={{ mb: 1 }}>
               Uploading: {uploadProgress}%
             </Typography>
@@ -118,16 +117,16 @@ const FileUploadForm = ({ endpoint }) => {
         
       case 'success':
         return (
-          <Alert severity="success" sx={{ mt: 2 }}>
+          <Alert severity="success" sx={{ mt: 3, width: '100%' }}>
             <AlertTitle>Success</AlertTitle>
-            Upload complete! Navigating to results...
+            Upload complete! Analyzing your profile...
             <CircularProgress size={20} sx={{ ml: 2 }} />
           </Alert>
         );
         
       case 'error':
         return (
-          <Alert severity="error" sx={{ mt: 2 }}>
+          <Alert severity="error" sx={{ mt: 3, width: '100%' }}>
             <AlertTitle>Error</AlertTitle>
             {errorMessage || 'An error occurred during upload. Please try again.'}
           </Alert>
@@ -139,91 +138,71 @@ const FileUploadForm = ({ endpoint }) => {
   };
 
   return (
-    <Paper 
-      elevation={3}
-      sx={{ 
-        p: 3, 
-        backgroundColor: 'background.paper', 
-        color: 'text.primary',
-        borderRadius: 2,
-        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)'
-      }}
-    >
-      <Stack spacing={2} alignItems="center">
-        <CloudUpload sx={{ fontSize: 48, color: 'primary.main', mb: 1 }} />
-        
-        <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
-          Upload Your Professional Profile
-        </Typography>
-        
-        <Typography variant="body1" sx={{ mb: 2, textAlign: 'center' }}>
-          Upload your resume, LinkedIn profile data, or photo of your resume to visualize your career path and professional network. We support PDF, DOCX, images, and other common file formats.
-        </Typography>
-        
-        <Box sx={{ width: '100%', textAlign: 'center' }}>
-          <input
-            accept=".json,.csv,.xml,.pdf,.docx,.doc,.txt,.rtf,.html,.htm,.odt,.jpg,.jpeg,.png,.gif,.tiff,.bmp"
-            style={{ display: 'none' }}
-            id="upload-file"
-            type="file"
-            onChange={handleFileChange}
-          />
-          <label htmlFor="upload-file">
-            <Button
-              variant="outlined"
-              component="span"
-              sx={{
-                borderColor: 'primary.main',
-                color: 'primary.main',
-                py: 1.5,
-                px: 3,
-                mr: 2,
-                '&:hover': {
-                  borderColor: 'primary.dark',
-                  backgroundColor: 'rgba(60, 223, 255, 0.08)'
-                }
-              }}
-            >
-              Select File
-            </Button>
-          </label>
+    <Stack spacing={3} alignItems="center">
+      <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 2 }}>
+        <input
+          accept=".json,.csv,.xml,.pdf,.docx,.doc,.txt,.rtf,.html,.htm,.odt,.jpg,.jpeg,.png,.gif,.tiff,.bmp"
+          style={{ display: 'none' }}
+          id="upload-file"
+          type="file"
+          onChange={handleFileChange}
+        />
+        <label htmlFor="upload-file">
           <Button
-            variant="contained"
-            onClick={handleUpload}
-            disabled={!selectedFile || uploadStatus === 'uploading'}
+            variant="outlined"
+            component="span"
+            startIcon={<FileUpload />}
             sx={{
-              backgroundColor: 'primary.main',
-              color: 'primary.contrastText',
-              fontWeight: 'bold',
+              borderColor: 'primary.main',
+              color: 'primary.main',
               py: 1.5,
               px: 3,
               '&:hover': {
-                backgroundColor: 'primary.dark'
+                borderColor: 'primary.dark',
+                backgroundColor: 'rgba(60, 223, 255, 0.08)'
               }
             }}
           >
-            {uploadStatus === 'uploading' ? (
-              <>
-                Uploading... <CircularProgress size={20} sx={{ ml: 1, color: 'black' }} />
-              </>
-            ) : (
-              'Upload & Visualize'
-            )}
+            Select File
           </Button>
-        </Box>
-        
-        {selectedFile && (
-          <Fade in={!!selectedFile}>
-            <Alert severity="info" sx={{ mt: 2, width: '100%' }}>
-              <AlertTitle>Selected File</AlertTitle>
-              {selectedFile.name} ({(selectedFile.size / 1024).toFixed(2)} KB)
-            </Alert>
-          </Fade>
-        )}
-        
-        {renderUploadStatus()}
-      </Stack>
-    </Paper>
+        </label>
+        <Button
+          variant="contained"
+          onClick={handleUpload}
+          disabled={!selectedFile || uploadStatus === 'uploading'}
+          startIcon={<CloudUpload />}
+          sx={{
+            backgroundColor: 'primary.main',
+            color: 'primary.contrastText',
+            fontWeight: 'bold',
+            py: 1.5,
+            px: 3,
+            '&:hover': {
+              backgroundColor: 'primary.dark'
+            }
+          }}
+        >
+          {uploadStatus === 'uploading' ? (
+            <>
+              Uploading <CircularProgress size={20} sx={{ ml: 1, color: 'white' }} />
+            </>
+          ) : (
+            'Upload & Analyze'
+          )}
+        </Button>
+      </Box>
+      
+      {selectedFile && (
+        <Fade in={!!selectedFile}>
+          <Alert severity="info" sx={{ width: '100%' }}>
+            <AlertTitle>Selected File</AlertTitle>
+            {selectedFile.name} ({(selectedFile.size / 1024).toFixed(2)} KB)
+          </Alert>
+        </Fade>
+      )}
+      
+      {renderUploadStatus()}
+    </Stack>
   );
 };
 

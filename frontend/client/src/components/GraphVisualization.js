@@ -7,14 +7,26 @@ const GraphVisualization = ({ data }) => {
   
   useEffect(() => {
     if (!data || !data.nodes || !data.links || data.nodes.length === 0) {
+      console.warn("No graph data available to visualize:", data);
       return;
     }
+    
+    console.log("Visualizing graph data:", data);
+    
+    // Make deep copies to avoid modifying the original data
+    const nodes = JSON.parse(JSON.stringify(data.nodes));
+    const links = JSON.parse(JSON.stringify(data.links)).map(link => ({
+      ...link,
+      // Make sure source and target are strings or objects with id
+      source: typeof link.source === 'object' ? link.source.id : link.source,
+      target: typeof link.target === 'object' ? link.target.id : link.target
+    }));
     
     // Clear any existing SVG content
     d3.select(svgRef.current).selectAll('*').remove();
     
-    const width = svgRef.current.clientWidth;
-    const height = svgRef.current.clientHeight;
+    const width = svgRef.current.clientWidth || 800;
+    const height = svgRef.current.clientHeight || 600;
 
     // Create SVG element
     const svg = d3.select(svgRef.current)
@@ -41,18 +53,19 @@ const GraphVisualization = ({ data }) => {
     };
 
     // Create a simulation for positioning nodes
-    const simulation = d3.forceSimulation(data.nodes)
-      .force('link', d3.forceLink(data.links).id(d => d.id).distance(100))
-      .force('charge', d3.forceManyBody().strength(-400))
+    const simulation = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(d => d.id).distance(150))
+      .force('charge', d3.forceManyBody().strength(-500))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('x', d3.forceX(width / 2).strength(0.1))
-      .force('y', d3.forceY(height / 2).strength(0.1));
+      .force('y', d3.forceY(height / 2).strength(0.1))
+      .alphaDecay(0.028); // Slow down the simulation cooling for better layout
 
     // Create links with arrows
     const link = g.append('g')
       .attr('class', 'links')
       .selectAll('g')
-      .data(data.links)
+      .data(links)
       .enter().append('g');
       
     // Link lines
@@ -67,6 +80,7 @@ const GraphVisualization = ({ data }) => {
       .attr('dy', -5)
       .attr('text-anchor', 'middle')
       .attr('fill', '#cccccc')
+      .attr('font-size', '10px')
       .text(d => d.label || '');
       
     // Add arrow markers for links
@@ -91,7 +105,7 @@ const GraphVisualization = ({ data }) => {
     const node = g.append('g')
       .attr('class', 'nodes')
       .selectAll('g')
-      .data(data.nodes)
+      .data(nodes)
       .enter().append('g')
       .call(d3.drag()
         .on('start', dragstarted)
@@ -109,6 +123,7 @@ const GraphVisualization = ({ data }) => {
     node.append('text')
       .attr('dy', 4)
       .attr('dx', 12)
+      .attr('font-size', '12px')
       .text(d => d.label || d.name || d.id)
       .attr('fill', '#ffffff');
 
@@ -132,20 +147,28 @@ const GraphVisualization = ({ data }) => {
       link.selectAll('line')
         .attr('stroke-opacity', 0.2);
       
-      // Highlight connected links
-      const connectedLinks = data.links.filter(l => l.source.id === d.id || l.target.id === d.id);
+      // Find connected links
+      const connectedLinks = links.filter(l => {
+        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+        return sourceId === d.id || targetId === d.id;
+      });
       
+      // Highlight connected links
       link.filter(l => connectedLinks.includes(l))
         .selectAll('line')
         .attr('stroke', '#ff0')
         .attr('stroke-opacity', 1)
         .attr('stroke-width', 2);
         
-      // Highlight connected nodes
-      const connectedNodeIds = connectedLinks.map(l => 
-        l.source.id === d.id ? l.target.id : l.source.id
-      );
+      // Find connected nodes
+      const connectedNodeIds = connectedLinks.map(l => {
+        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+        return sourceId === d.id ? targetId : sourceId;
+      });
       
+      // Highlight connected nodes
       node.filter(n => connectedNodeIds.includes(n.id))
         .select('circle')
         .attr('stroke', '#ff0')
@@ -196,6 +219,9 @@ const GraphVisualization = ({ data }) => {
       d.fx = event.x;
       d.fy = event.y;
     }
+
+    // Run simulation for 300 ticks to get better initial positions
+    for (let i = 0; i < 300; ++i) simulation.tick();
 
     // Cleanup function
     return () => {
