@@ -2,7 +2,7 @@
  * API Service for all backend interactions
  */
 
-const API_BASE_URL = 'http://localhost:5001/api';
+const API_BASE_URL = 'http://localhost:8000/api';
 
 /**
  * Generic API call function with error handling

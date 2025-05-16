@@ -1,262 +1,193 @@
 // frontend/client/src/components/visualizations/SankeyDiagram.js
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
-import { sankey, sankeyLinkHorizontal } from 'd3-sankey';
-import {
-  Box,
-  Paper,
-  Typography,
-  FormControl,
-  Select,
-  MenuItem,
-  InputLabel,
-  Tooltip,
-  IconButton
-} from '@mui/material';
-import { Refresh as RefreshIcon } from '@mui/icons-material';
+import { Box } from '@mui/material';
 
-const SankeyDiagram = ({ data, title, height = 600 }) => {
+// Simple Sankey diagram replacement - intentionally avoiding d3-sankey library issues
+const SankeyDiagram = ({ data, height = 500 }) => {
   const svgRef = useRef();
-  const [timeRange, setTimeRange] = useState('3M');
-  const [flowData, setFlowData] = useState(null);
-
-  // Process the raw data into Sankey format
-  const processData = (rawData, range) => {
-    if (!rawData || !rawData.flows) return null;
-
-    // Filter data by time range
-    const cutoffDate = new Date();
-    const months = parseInt(range.replace('M', ''));
-    cutoffDate.setMonth(cutoffDate.getMonth() - months);
-
-    const filteredFlows = rawData.flows.filter(flow => 
-      new Date(flow.date) >= cutoffDate
-    );
-
-    // Create nodes and links for Sankey
-    const nodeMap = new Map();
-    const links = [];
-
-    // Process flows to create nodes and links
-    filteredFlows.forEach(flow => {
-      const sourceKey = `${flow.sourceCompany}-source`;
-      const targetKey = `${flow.targetCompany}-target`;
-
-      // Add nodes if they don't exist
-      if (!nodeMap.has(sourceKey)) {
-        nodeMap.set(sourceKey, {
-          id: sourceKey,
-          name: flow.sourceCompany,
-          category: 'source',
-          color: '#FF5FA2'
-        });
-      }
-
-      if (!nodeMap.has(targetKey)) {
-        nodeMap.set(targetKey, {
-          id: targetKey,
-          name: flow.targetCompany,
-          category: 'target',
-          color: '#3CDFFF'
-        });
-      }
-
-      // Create link
-      links.push({
-        source: sourceKey,
-        target: targetKey,
-        value: flow.count,
-        names: flow.names || []
-      });
-    });
-
-    return {
-      nodes: Array.from(nodeMap.values()),
-      links: links
-    };
-  };
-
-  // Fetch talent flow data
-  const fetchFlowData = async () => {
-    try {
-      const response = await fetch(`/api/vc/talent-flows?timeRange=${timeRange}`);
-      const data = await response.json();
-      if (data.success) {
-        const processed = processData(data, timeRange);
-        setFlowData(processed);
-      }
-    } catch (error) {
-      console.error('Error fetching flow data:', error);
-    }
-  };
 
   useEffect(() => {
-    fetchFlowData();
-  }, [timeRange]);
-
-  useEffect(() => {
-    if (!flowData || !svgRef.current) return;
-
-    // Clear previous visualization
-    d3.select(svgRef.current).selectAll('*').remove();
-
+    // Clear any existing content
     const svg = d3.select(svgRef.current);
+    svg.selectAll("*").remove();
+    
+    // Get dimensions
     const width = svgRef.current.clientWidth;
-    const margin = { top: 20, right: 50, bottom: 20, left: 50 };
+    const margin = { top: 20, right: 30, bottom: 20, left: 30 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
-
-    const g = svg.append('g')
-      .attr('transform', `translate(${margin.left},${margin.top})`);
-
-    // Create Sankey generator
-    const sankeyGenerator = sankey()
-      .nodeWidth(20)
-      .nodePadding(10)
-      .extent([[0, 0], [innerWidth, innerHeight]]);
-
-    // Generate Sankey layout
-    const { nodes, links } = sankeyGenerator(flowData);
-
-    // Color scale for links
-    const colorScale = d3.scaleOrdinal()
-      .domain(['low', 'medium', 'high'])
-      .range(['#FFD166', '#FF8C42', '#FF5FA2']);
-
-    // Add links
-    const link = g.append('g')
-      .selectAll('.link')
-      .data(links)
-      .enter().append('path')
-      .attr('class', 'link')
-      .attr('d', sankeyLinkHorizontal())
-      .attr('stroke', d => {
-        const intensity = d.value > 10 ? 'high' : d.value > 5 ? 'medium' : 'low';
-        return colorScale(intensity);
-      })
-      .attr('stroke-width', d => Math.max(1, d.width))
-      .attr('stroke-opacity', 0.7)
-      .attr('fill', 'none');
-
-    // Add link labels on hover
-    link.on('mouseover', function(event, d) {
-        const tooltip = d3.select('body').append('div')
-          .attr('class', 'sankey-tooltip')
-          .style('position', 'absolute')
-          .style('background', 'rgba(0,0,0,0.9)')
-          .style('color', 'white')
-          .style('padding', '10px')
-          .style('border-radius', '5px')
-          .style('pointer-events', 'none')
-          .style('z-index', 1000);
-
-        tooltip.html(`
-          <div><strong>${d.source.name} → ${d.target.name}</strong></div>
-          <div>Transitions: ${d.value}</div>
-          ${d.names && d.names.length > 0 ? 
-            `<div>Recent: ${d.names.slice(0, 3).join(', ')}${d.names.length > 3 ? '...' : ''}</div>` 
-            : ''
-          }
-        `)
-        .style('left', (event.pageX + 10) + 'px')
-        .style('top', (event.pageY - 10) + 'px');
-      })
-      .on('mouseout', function() {
-        d3.selectAll('.sankey-tooltip').remove();
+    
+    // Create container group
+    const g = svg.append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+    
+    try {
+      console.log("Creating basic flow diagram with:", 
+        data.nodes?.length || 0, "nodes and", 
+        data.links?.length || 0, "links");
+      
+      // Simplified flow diagram approach
+      // Create fixed column positions
+      const NODE_RADIUS = 10;
+      const SOURCE_X = innerWidth * 0.2;  // Sources on the left
+      const TARGET_X = innerWidth * 0.8;  // Targets on the right
+      
+      // Create a Set of all source and target names
+      const sourceIds = new Set(data.links.map(d => d.source));
+      const targetIds = new Set(data.links.map(d => d.target));
+      
+      // Find nodes that are both sources and targets
+      const bothIds = new Set([...sourceIds].filter(id => targetIds.has(id)));
+      
+      // Assign positions to nodes
+      const nodePositions = {};
+      const sourceNodes = data.nodes.filter(n => sourceIds.has(n.id) && !targetIds.has(n.id));
+      const targetNodes = data.nodes.filter(n => targetIds.has(n.id) && !sourceIds.has(n.id));
+      const middleNodes = data.nodes.filter(n => bothIds.has(n.id));
+      
+      // Calculate vertical spacing
+      const sourcesHeight = innerHeight * 0.8;
+      const targetsHeight = innerHeight * 0.8;
+      const sourceSpacing = sourceNodes.length > 1 ? sourcesHeight / (sourceNodes.length - 1) : 0;
+      const targetSpacing = targetNodes.length > 1 ? targetsHeight / (targetNodes.length - 1) : 0;
+      
+      // Position source nodes
+      sourceNodes.forEach((node, i) => {
+        nodePositions[node.id] = {
+          x: SOURCE_X,
+          y: margin.top + (sourceNodes.length > 1 
+            ? i * sourceSpacing 
+            : innerHeight / 2),
+          type: 'source',
+          node
+        };
       });
-
-    // Add nodes
-    const node = g.append('g')
-      .selectAll('.node')
-      .data(nodes)
-      .enter().append('g')
-      .attr('class', 'node');
-
-    // Add node rectangles
-    node.append('rect')
-      .attr('x', d => d.x0)
-      .attr('y', d => d.y0)
-      .attr('height', d => d.y1 - d.y0)
-      .attr('width', d => d.x1 - d.x0)
-      .attr('fill', d => d.color)
-      .attr('stroke', '#000')
-      .attr('stroke-width', 1);
-
-    // Add node labels
-    node.append('text')
-      .attr('x', d => d.x0 - 6)
-      .attr('y', d => (d.y1 + d.y0) / 2)
-      .attr('dy', '0.35em')
-      .attr('text-anchor', 'end')
-      .style('font-size', '12px')
-      .style('fill', 'white')
-      .text(d => d.name)
-      .filter(d => d.x0 < innerWidth / 2)
-      .attr('x', d => d.x1 + 6)
-      .attr('text-anchor', 'start');
-
-    // Add node values
-    node.append('text')
-      .attr('x', d => d.x0 < innerWidth / 2 ? d.x1 + 6 : d.x0 - 6)
-      .attr('y', d => (d.y1 + d.y0) / 2 + 15)
-      .attr('dy', '0.35em')
-      .attr('text-anchor', d => d.x0 < innerWidth / 2 ? 'start' : 'end')
-      .style('font-size', '10px')
-      .style('fill', '#ccc')
-      .text(d => `${d.value} transitions`);
-
-  }, [flowData, height]);
+      
+      // Position target nodes
+      targetNodes.forEach((node, i) => {
+        nodePositions[node.id] = {
+          x: TARGET_X,
+          y: margin.top + (targetNodes.length > 1 
+            ? i * targetSpacing
+            : innerHeight / 2),
+          type: 'target',
+          node
+        };
+      });
+      
+      // Position middle nodes (if any)
+      const MIDDLE_X = innerWidth * 0.5;
+      const middleSpacing = middleNodes.length > 1 ? innerHeight * 0.8 / (middleNodes.length - 1) : 0;
+      
+      middleNodes.forEach((node, i) => {
+        nodePositions[node.id] = {
+          x: MIDDLE_X,
+          y: margin.top + (middleNodes.length > 1 
+            ? i * middleSpacing 
+            : innerHeight / 2),
+          type: 'both',
+          node
+        };
+      });
+      
+      // Draw flow paths
+      const linkGroup = g.append("g").attr("class", "links");
+      
+      // Color scale based on link value
+      const linkColorScale = d3.scaleSequential()
+        .domain([0, d3.max(data.links, d => d.value) || 1])
+        .interpolator(d3.interpolateBlues);
+      
+      // Create links
+      data.links.forEach(link => {
+        const sourcePos = nodePositions[link.source];
+        const targetPos = nodePositions[link.target];
+        
+        if (sourcePos && targetPos) {
+          // Draw a curved path
+          const path = linkGroup.append("path")
+            .attr("d", () => {
+              const x1 = sourcePos.x;
+              const y1 = sourcePos.y;
+              const x2 = targetPos.x;
+              const y2 = targetPos.y;
+              
+              // Calculate control points for a nice curve
+              const controlX = (x1 + x2) / 2;
+              
+              return `M${x1},${y1} C${controlX},${y1} ${controlX},${y2} ${x2},${y2}`;
+            })
+            .attr("stroke", linkColorScale(link.value))
+            .attr("stroke-width", Math.max(1, Math.min(10, link.value / 2))) // Scale width based on value, but limit size
+            .attr("stroke-opacity", 0.7)
+            .attr("fill", "none");
+          
+          // Add tooltip to path
+          path.append("title")
+            .text(`${sourcePos.node.name} → ${targetPos.node.name}: ${link.value} transitions`);
+        }
+      });
+      
+      // Draw nodes
+      const nodeGroup = g.append("g").attr("class", "nodes");
+      
+      // Create nodes
+      Object.values(nodePositions).forEach(pos => {
+        // Node group
+        const nodeG = nodeGroup.append("g")
+          .attr("transform", `translate(${pos.x},${pos.y})`)
+          .attr("data-id", pos.node.id);
+        
+        // Node circle
+        nodeG.append("circle")
+          .attr("r", NODE_RADIUS)
+          .attr("fill", pos.type === 'source' ? "#4682B4" : 
+                        pos.type === 'target' ? "#6A5ACD" : "#20B2AA")
+          .attr("stroke", "#333")
+          .attr("stroke-width", 1);
+        
+        // Node label
+        nodeG.append("text")
+          .attr("x", pos.type === 'source' ? -15 : 15)
+          .attr("y", 0)
+          .attr("text-anchor", pos.type === 'source' ? "end" : "start")
+          .attr("dominant-baseline", "middle")
+          .attr("fill", "white")
+          .text(pos.node.name)
+          .style("font-size", "12px");
+        
+        // Add tooltips
+        nodeG.append("title")
+          .text(() => {
+            const inflow = pos.node.inflow || 0;
+            const outflow = pos.node.outflow || 0;
+            return `${pos.node.name}\nInflow: ${inflow}\nOutflow: ${outflow}`;
+          });
+      });
+    } catch (error) {
+      console.error("Error rendering diagram:", error);
+      
+      // Show error message in SVG
+      svg.append("text")
+        .attr("x", width / 2)
+        .attr("y", height / 2)
+        .attr("text-anchor", "middle")
+        .attr("fill", "white")
+        .style("font-size", "14px")
+        .text("Error rendering Sankey diagram");
+    }
+  }, [data, height]);
 
   return (
-    <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h6" fontWeight={600} sx={{ flexGrow: 1 }}>
-          {title || 'Talent Flow Analysis'}
-        </Typography>
-        <FormControl size="small" sx={{ minWidth: 120, mr: 2 }}>
-          <InputLabel>Time Range</InputLabel>
-          <Select
-            value={timeRange}
-            label="Time Range"
-            onChange={(e) => setTimeRange(e.target.value)}
-          >
-            <MenuItem value="1M">1 Month</MenuItem>
-            <MenuItem value="3M">3 Months</MenuItem>
-            <MenuItem value="6M">6 Months</MenuItem>
-            <MenuItem value="12M">1 Year</MenuItem>
-          </Select>
-        </FormControl>
-        <Tooltip title="Refresh Data">
-          <IconButton onClick={fetchFlowData} size="small">
-            <RefreshIcon />
-          </IconButton>
-        </Tooltip>
-      </Box>
-
-      <Box sx={{ width: '100%', height: height }}>
-        <svg
-          ref={svgRef}
-          width="100%"
-          height={height}
-          style={{ background: '#1A2338', borderRadius: '8px' }}
-        />
-      </Box>
-
-      <Box sx={{ mt: 2, display: 'flex', gap: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Box sx={{ width: 20, height: 4, bgcolor: '#FF5FA2', mr: 1 }} />
-          <Typography variant="caption">High Volume (10+ transitions)</Typography>
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Box sx={{ width: 20, height: 4, bgcolor: '#FF8C42', mr: 1 }} />
-          <Typography variant="caption">Medium Volume (5-10 transitions)</Typography>
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Box sx={{ width: 20, height: 4, bgcolor: '#FFD166', mr: 1 }} />
-          <Typography variant="caption">Low Volume (&lt;5 transitions)</Typography>
-        </Box>
-      </Box>
-    </Paper>
+    <Box sx={{ width: '100%', height: height }}>
+      <svg
+        ref={svgRef}
+        width="100%"
+        height={height}
+        style={{ background: '#1A2338', borderRadius: '4px' }}
+      />
+    </Box>
   );
 };
 

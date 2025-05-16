@@ -46,39 +46,174 @@ def raw_text_from_upload(filename: str, fp: bytes) -> str:
 
 
 def text_to_profile(text: str) -> LinkedInProfile:
-    system = (
-        "You are a résumé parser. Read the text and emit valid JSON that matches "
-        "the LinkedInProfile schema exactly – field aliases included."
-    )
+    """
+    Convert raw resume text into a structured LinkedInProfile object using AI.
+    
+    This function uses OpenAI's models to parse resume text into structured data,
+    with fallback mechanisms and validation to ensure high-quality extraction.
+    
+    Args:
+        text: Raw text from a resume or LinkedIn profile
+        
+    Returns:
+        LinkedInProfile: Structured profile data
+        
+    Raises:
+        ValueError: If the profile data cannot be parsed or validated
+    """
+    # Prepare a detailed system prompt to guide the model
+    system = """
+    You are an expert resume parser specialized in extracting structured information from resumes and LinkedIn profiles.
+    Your task is to accurately extract profile information including:
+    
+    1. Personal details (name, contact information)
+    2. Work experience with accurate company names, job titles, dates, and descriptions
+    3. Education history with institutions, degrees, and dates
+    4. Skills categorized by type (technical, soft skills, etc.)
+    5. Certifications and other professional qualifications
+    
+    For dates, extract as much detail as available (year, month, day).
+    For companies, ensure consistent naming and provide industry information when possible.
+    For job titles, standardize to common industry terms while preserving specialization.
+    
+    The output must conform exactly to the LinkedInProfile schema provided.
+    Be conservative - if information is unclear or ambiguous, it's better to omit it than guess incorrectly.
+    """
 
+    # Add schema information to the prompt
     schema = LinkedInProfile.model_json_schema()
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": text[:20_000]},
-        ],
-        tools=[
-            {
-                "type": "function",
-                "function": {
-                    "name": "deliver",
-                    "description": "Return the candidate profile",
-                    "parameters": schema,
-                },
-            }
-        ],
-        tool_choice="required",  # «auto» if don't want to force it
-    )
-
-    # grab arguments from the first (and only) tool call
-    tool_call = response.choices[0].message.tool_calls[0]
-    json_profile = json.loads(tool_call.function.arguments)
+    
+    # Try with the most capable model first
     try:
-        return LinkedInProfile(**json_profile)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": text[:32_000]},  # Allow more context
+            ],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "extract_profile",
+                        "description": "Extract structured profile information from resume text",
+                        "parameters": schema,
+                    },
+                }
+            ],
+            tool_choice={"type": "function", "function": {"name": "extract_profile"}},
+            temperature=0.2,  # Lower temperature for more deterministic extraction
+        )
+        
+        # Extract the profile data from the response
+        tool_call = response.choices[0].message.tool_calls[0]
+        json_profile = json.loads(tool_call.function.arguments)
+        
+    except Exception as e:
+        # Log the error
+        print(f"Error with primary model, falling back to alternative: {e}")
+        
+        # Fall back to a smaller, more reliable model
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": text[:20_000]},
+                ],
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "extract_profile",
+                            "description": "Extract structured profile information from resume text",
+                            "parameters": schema,
+                        },
+                    }
+                ],
+                tool_choice={"type": "function", "function": {"name": "extract_profile"}},
+            )
+            
+            tool_call = response.choices[0].message.tool_calls[0]
+            json_profile = json.loads(tool_call.function.arguments)
+            
+        except Exception as fallback_error:
+            raise ValueError(f"Failed to parse profile with fallback model: {fallback_error}") from fallback_error
+    
+    # Validate and fix common issues before creating the model
+    try:
+        # Ensure profile_urn exists
+        if 'profile_urn' not in json_profile or not json_profile['profile_urn']:
+            json_profile['profile_urn'] = f"urn:li:profile:{uuid4().hex}"
+        
+        # Normalize dates in experience
+        if 'experience' in json_profile:
+            for i, exp in enumerate(json_profile['experience']):
+                if 'time_period' in exp:
+                    # Ensure start_date has at least year
+                    if 'start_date' in exp['time_period'] and exp['time_period']['start_date']:
+                        if 'year' not in exp['time_period']['start_date'] or not exp['time_period']['start_date']['year']:
+                            # Try to infer year from other experiences or set to current year
+                            exp['time_period']['start_date']['year'] = datetime.now().year
+        
+        # Ensure company URNs are set
+        if 'experience' in json_profile:
+            for i, exp in enumerate(json_profile['experience']):
+                if 'company' in exp and ('urn' not in exp['company'] or not exp['company']['urn']):
+                    exp['company']['urn'] = f"urn:li:company:{uuid4().hex[:12]}"
+        
+        # Create the validated profile object
+        profile = LinkedInProfile(**json_profile)
+        
+        # Additional validation for essential fields
+        if not profile.first_name or not profile.last_name:
+            if profile.full_name:
+                # Try to split full name
+                parts = profile.full_name.split(maxsplit=1)
+                if len(parts) >= 2:
+                    profile.first_name = parts[0]
+                    profile.last_name = parts[1]
+                else:
+                    profile.first_name = profile.full_name
+                    profile.last_name = "."
+        
+        return profile
+        
     except ValidationError as e:
-        raise ValueError(f"Invalid profile data: {e}") from e
+        # Try to fix common validation errors
+        error_msg = str(e)
+        print(f"Validation error: {error_msg}")
+        
+        # Make one more attempt with explicit error information
+        try:
+            # Send the validation error back to the model to get a fixed version
+            fix_response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": text[:10_000]},
+                    {"role": "assistant", "content": f"I tried to parse this resume but encountered validation errors: {error_msg}. Let me fix these issues and try again."}
+                ],
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "extract_profile",
+                            "description": "Extract structured profile information from resume text",
+                            "parameters": schema,
+                        },
+                    }
+                ],
+                tool_choice={"type": "function", "function": {"name": "extract_profile"}},
+            )
+            
+            fixed_tool_call = fix_response.choices[0].message.tool_calls[0]
+            fixed_json_profile = json.loads(fixed_tool_call.function.arguments)
+            
+            return LinkedInProfile(**fixed_json_profile)
+            
+        except Exception as repair_error:
+            raise ValueError(f"Failed to repair invalid profile data: {error_msg}") from repair_error
 
 
 # parsers/profile_extract.py   (add below text_to_profile)

@@ -8,7 +8,8 @@ import {
   Tab,
   Alert,
   CircularProgress,
-  Paper
+  Paper,
+  Button
 } from '@mui/material';
 import { useVC } from '../context/VCContext';
 import ModeToggle from '../components/ModeToggle';
@@ -16,6 +17,9 @@ import VCFilters from '../components/VCFilters';
 import CompanyLeaderboard from '../components/CompanyLeaderboard';
 import PortfolioOverview from '../components/PortfolioOverview';
 import SkillTrends from '../components/SkillTrends';
+import RecommendationEngine from '../components/RecommendationEngine';
+import TalentFlowVisualizer from '../components/visualizations/TalentFlowVisualizer';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
 // Create single instance of SkillTrends to reuse
 const skillTrendsInstance = <SkillTrends />;
@@ -34,20 +38,74 @@ const VCDashboard = () => {
     setActiveTab(newValue);
   };
 
+  // Handle action clicks from recommendation engine
+  const handleRecommendationAction = (actionType, item) => {
+    console.log(`Recommendation action: ${actionType}`, item);
+    
+    switch(actionType) {
+      case 'invest':
+      case 'view_company':
+        // Navigate to company details or open investment modal
+        alert(`Viewing details for ${item.companyName || item.name}`);
+        break;
+      case 'contact':
+        // Open contact form or modal
+        alert(`Contacting ${item.candidateName || item.name}`);
+        break;
+      case 'view_profile':
+        // Open profile view
+        alert(`Viewing profile for ${item.candidateName || item.name}`);
+        break;
+      case 'pursue_opportunity':
+        // Take action on opportunity
+        alert(`Pursuing opportunity: ${item.title}`);
+        break;
+      case 'initiate_partnership':
+        // Initiate partnership workflow
+        alert(`Initiating partnership with ${item.companyName}`);
+        break;
+      default:
+        console.log('Unknown action:', actionType);
+    }
+  };
+
+  // Handle company selection
+  const handleCompanySelect = (companyId) => {
+    alert(`Selected company with ID: ${companyId}`);
+    // In a real implementation, you would navigate to company details page
+    // or open a modal with company details
+  };
+
   // Render content based on mode and active tab
   const renderContent = () => {
     if (state.loading) {
       return (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-          <CircularProgress />
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 4 }}>
+          <CircularProgress size={40} sx={{ mb: 2 }} />
+          <Typography variant="body1" color="text.secondary">
+            Loading data...
+          </Typography>
         </Box>
       );
     }
 
     if (state.error) {
       return (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {state.error}
+        <Alert 
+          severity="error" 
+          sx={{ mb: 3 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => actions.clearError()} startIcon={<RefreshIcon />}>
+              Retry
+            </Button>
+          }
+        >
+          <Typography variant="body1" gutterBottom>
+            Error loading data
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {state.error}
+          </Typography>
         </Alert>
       );
     }
@@ -67,6 +125,27 @@ const VCDashboard = () => {
           return <CompanyLeaderboard companies={state.companies} />;
         case 2: // Skills/Hiring
           return skillTrendsInstance;
+        case 3: // Flows
+          return (
+            <TalentFlowVisualizer 
+              companyIds={state.companies.map(c => c.urn).slice(0, 10)} 
+              regionIds={state.filters.geo_regions}
+              timePeriod="6m"
+            />
+          );
+        case 4: // Recommendations
+          return (
+            <RecommendationEngine 
+              mode="investment"
+              context={{
+                industries: state.filters.industries,
+                funding_stages: state.filters.funding_stages,
+                geo_regions: state.filters.geo_regions
+              }}
+              onActionClick={handleRecommendationAction}
+              onCompanySelect={handleCompanySelect}
+            />
+          );
         default:
           return <Typography>Tab content coming soon...</Typography>;
       }
@@ -79,6 +158,17 @@ const VCDashboard = () => {
           return <Typography>Portfolio map visualization coming soon...</Typography>;
         case 2: // Alerts
           return <Typography>Portfolio alerts coming soon...</Typography>;
+        case 3: // Company Health
+          return (
+            <RecommendationEngine 
+              mode="portfolio"
+              context={{
+                portfolio_ids: state.filters.portfolio_ids
+              }}
+              onActionClick={handleRecommendationAction}
+              onCompanySelect={handleCompanySelect}
+            />
+          );
         default:
           return <Typography>Tab content coming soon...</Typography>;
       }

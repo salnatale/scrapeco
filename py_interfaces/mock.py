@@ -144,7 +144,7 @@ def create_intelligent_mock_profile(**kwargs) -> Dict[str, Any]:
     
     # Create a Chat Completion request
     response = client.chat.completions.create(
-        model="gpt-3.5-turbo", 
+        model="gpt-4o-mini", 
         messages=[
             {"role": "system", "content": system_content+sys_content_continued},
             {"role": "user", "content": user_content},
@@ -171,7 +171,7 @@ def propose_next_role_with_completions(
     description: Optional[str] = None,
     start_year: Optional[int] = None,
     start_month: Optional[int] = None,
-    model: str = "gpt-4o",
+    model: str = "gpt-4o-mini",
     temperature: float = 0.7,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -501,7 +501,7 @@ def llm_filter_profile_list(profiles: List[LinkedInProfile], description: str, p
     # create the LLM query
     client = OpenAI()
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         messages=[
             {"role": "developer", "content": system_content},
             {"role": "user", "content": user_content},
